@@ -6,6 +6,7 @@
 #include "driver/rmt_tx.h"
 #include "driver/gpio.h"
 #include "ir_command_write.h"
+#include "commands.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -107,11 +108,13 @@ void app_main(void)
     // 7. Enable tx channel
     ESP_ERROR_CHECK(rmt_enable(tx_channel));
 
-    ir_symbol_t ir_commands[5][IR_LENGTH];
-    int command_lengths[5] = {0};
+    ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
+    int command_lengths[CMD_COUNT] = {0};
     rmt_symbol_word_t tx_symbols[IR_LENGTH];
     bool captured = false;
     int cmd_index = 0;
+
+    bool learning_mode = true;
 
     while (1)
     {
@@ -124,20 +127,34 @@ void app_main(void)
 
             if (count > 34) // to do something about IR_LENGTH later
                 count = 34;
-            if (true) // true for test -> !captured <-
+
+            int curr_cmd_index = cmd_index;
+            if (learning_mode)
+            {
+                write_command(ir_commands, raw_symbols, command_lengths, count, curr_cmd_index);
+
+                
+                cmd_index++;
+
+
+                if (cmd_index >= CMD_COUNT)
+                {
+                    learning_mode = false;
+                    ESP_LOGI(TAG, "All commands captured!");
+                }
+            }
+
+            if (captured) // true for test -> !captured <-
             {
 
-                write_command(ir_commands, raw_symbols, tx_symbols, command_lengths, &captured, count, cmd_index);
-
-                ESP_ERROR_CHECK(rmt_transmit(
-                    tx_channel,
-                    copy_encoder,
-                    tx_symbols,
-                    command_lengths[cmd_index] * sizeof(rmt_symbol_word_t),
-                    &tx_trans_config));
-
-                ESP_ERROR_CHECK(rmt_tx_wait_all_done(tx_channel, portMAX_DELAY));
-                ESP_LOGI(TAG, "Transmit done");
+                send_command(tx_symbols,
+                             ir_commands,
+                             command_lengths,
+                             tx_channel,
+                             copy_encoder,
+                             &tx_trans_config,
+                             curr_cmd_index);
+                captured = false;
             }
             else
             {
