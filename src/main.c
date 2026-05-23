@@ -5,6 +5,8 @@
 #include "driver/rmt_rx.h"
 #include "driver/rmt_tx.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
+
 #include "ir_command_write.h"
 #include "commands.h"
 
@@ -12,6 +14,10 @@
 
 #define RMT_RX_GPIO GPIO_NUM_15
 #define IR_LED GPIO_NUM_16
+#define BTN_GPIO_ENC GPIO_NUM_4
+
+#define DEBOUNCE_US 50000 // 50ms
+#define BTN_LONG_PRESS 3000
 #define RMT_RESOLUTION_HZ 1000000 // 1us per tick
 
 #define MEM_BLOCK_SYMBOLS 64
@@ -106,6 +112,19 @@ void rmt_init()
     ESP_ERROR_CHECK(rmt_enable(tx_channel));
 }
 
+void encoder_init()
+{
+    ESP_LOGI(TAG, "Encoder button init");
+    gpio_config_t button_gpio_config = {
+        .pin_bit_mask = (1ULL << BTN_GPIO_ENC),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+
+    ESP_ERROR_CHECK(gpio_config(&button_gpio_config));
+}
 void app_main(void)
 {
     ESP_LOGI(TAG, "Starting IR sniffer...");
@@ -113,15 +132,24 @@ void app_main(void)
     ir_queue = xQueueCreate(QUEUE_SIZE, sizeof(rmt_rx_done_event_data_t));
 
     rmt_init();
+    encoder_init();
 
     // variables
     ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
     int command_lengths[CMD_COUNT] = {0};
     rmt_symbol_word_t tx_symbols[IR_LENGTH];
-    bool captured = false;
     int cmd_index = 0;
-    bool sequence_sent = false;
+    // bool sequence_sent = false;
     bool learning_mode = true;
+
+    // btn variables
+    int last_btn_level = 1;
+    int stable_btn_level = 1;
+    int64_t last_btn_change_us = 0;
+
+    int64_t btn_press_start_us = 0;
+    bool long_press_handled = false;
+    // bool sequence_mode = false;
 
     IR_COMMANDS movie_mode[] = {
         CMD_TURN_RED,
@@ -133,7 +161,7 @@ void app_main(void)
     {
         rmt_rx_done_event_data_t rx_data;
 
-        if (xQueueReceive(ir_queue, &rx_data, portMAX_DELAY))
+        if (xQueueReceive(ir_queue, &rx_data, pdMS_TO_TICKS(10)))
         {
             int count = rx_data.num_symbols;
             ESP_LOGI(TAG, "Frame received: symbols = %d", rx_data.num_symbols);
@@ -162,32 +190,73 @@ void app_main(void)
                     ESP_LOGI(TAG, "All commands captured!");
                 }
             }
-
-            if (!learning_mode && !sequence_sent) // true for test -> !captured <-
-            {
-                vTaskDelay(pdMS_TO_TICKS(500));
-                send_sequence(tx_symbols,
-                              ir_commands,
-                              command_lengths,
-                              tx_channel,
-                              copy_encoder,
-                              &tx_trans_config,
-                              movie_mode,
-                              3,
-                              500);
-
-                sequence_sent = true;
-            }
-            else
-            {
-                ESP_LOGI(TAG, "Frame ignored, learning not ended");
-            }
-
             ESP_LOGI(TAG, "---- END FRAME ----");
 
             // важливо: знову запустити прийом
             ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
                                         sizeof(raw_symbols), &receive_config));
+        }
+
+        // BTN + DEBOUNCE
+        int btn_level = gpio_get_level(BTN_GPIO_ENC);
+        int64_t now_us = esp_timer_get_time();
+
+        if (btn_level != last_btn_level)
+        {
+            last_btn_level = btn_level;
+            last_btn_change_us = now_us;
+        }
+
+        if (now_us - last_btn_change_us > DEBOUNCE_US)
+        {
+            if (btn_level != stable_btn_level)
+            {
+                stable_btn_level = btn_level;
+
+                if (stable_btn_level == 0)
+                {
+                    btn_press_start_us = now_us;
+                    long_press_handled = false;
+                }
+                else
+                {
+                    if (!long_press_handled)
+                    {
+                        // sequence_mode = !sequence_mode;
+                        // ESP_LOGI(TAG, "button short press: sequence mode = %d", sequence_mode);
+                        if (!learning_mode) // !sequence_sent
+                        {
+                            vTaskDelay(pdMS_TO_TICKS(500));
+                            send_sequence(tx_symbols,
+                                          ir_commands,
+                                          command_lengths,
+                                          tx_channel,
+                                          copy_encoder,
+                                          &tx_trans_config,
+                                          movie_mode,
+                                          3,
+                                          500);
+
+                            ESP_LOGI(TAG, "SHORT PRESS -> sending movie_mode sequence");
+                            // sequence_sent = true;
+                        }
+                        else
+                        {
+                            ESP_LOGI(TAG, "Frame ignored, learning not ended");
+                        }
+                    }
+                }
+            }
+        }
+
+        if (stable_btn_level == 0 &&
+            !long_press_handled &&
+            (now_us - btn_press_start_us) > BTN_LONG_PRESS * 1000ULL)
+        {
+
+            long_press_handled = true;
+
+            ESP_LOGI(TAG, "LONG BUTTON PRESS ->  smth sent");
         }
     }
 }
