@@ -32,12 +32,20 @@ static bool ir_rx_done_callback(rmt_channel_handle_t channel,
     return high_task_wakeup == pdTRUE;
 }
 
-void app_main(void)
+rmt_channel_handle_t rx_channel = NULL;
+rmt_channel_handle_t tx_channel = NULL;
+rmt_encoder_handle_t copy_encoder = NULL;
+rmt_symbol_word_t raw_symbols[MEM_BLOCK_SYMBOLS];
+rmt_transmit_config_t tx_trans_config = {
+    .loop_count = 0, // 0 = one loop
+};
+rmt_receive_config_t receive_config = {
+    .signal_range_min_ns = 1000,
+    .signal_range_max_ns = 10000000,
+};
+
+void rmt_init()
 {
-    ESP_LOGI(TAG, "Starting IR sniffer...");
-
-    ir_queue = xQueueCreate(QUEUE_SIZE, sizeof(rmt_rx_done_event_data_t));
-
     // 1. Конфіг RX каналу
     rmt_rx_channel_config_t rx_config = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
@@ -46,7 +54,6 @@ void app_main(void)
         .gpio_num = RMT_RX_GPIO,
     };
 
-    rmt_channel_handle_t rx_channel = NULL;
     ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_config, &rx_channel));
 
     // 2. Callback
@@ -60,12 +67,6 @@ void app_main(void)
     ESP_ERROR_CHECK(rmt_enable(rx_channel));
 
     // 4. Буфер для прийому
-    rmt_symbol_word_t raw_symbols[MEM_BLOCK_SYMBOLS];
-
-    rmt_receive_config_t receive_config = {
-        .signal_range_min_ns = 1000,
-        .signal_range_max_ns = 10000000,
-    };
 
     ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
                                 sizeof(raw_symbols), &receive_config));
@@ -82,7 +83,6 @@ void app_main(void)
         .flags.with_dma = false,   // do not need DMA backend
     };
 
-    rmt_channel_handle_t tx_channel = NULL;
     ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_conf, &tx_channel));
 
     // 6. carrier config
@@ -96,25 +96,38 @@ void app_main(void)
     ESP_ERROR_CHECK(rmt_apply_carrier(tx_channel, &tx_carrier_cg));
 
     // copy encoder
-    rmt_encoder_handle_t copy_encoder = NULL;
+
     rmt_copy_encoder_config_t copy_encoder_config = {};
     ESP_ERROR_CHECK(rmt_new_copy_encoder(&copy_encoder_config, &copy_encoder));
 
     // transmit
 
-    rmt_transmit_config_t tx_trans_config = {
-        .loop_count = 0, // 0 = one loop
-    };
     // 7. Enable tx channel
     ESP_ERROR_CHECK(rmt_enable(tx_channel));
+}
 
+void app_main(void)
+{
+    ESP_LOGI(TAG, "Starting IR sniffer...");
+
+    ir_queue = xQueueCreate(QUEUE_SIZE, sizeof(rmt_rx_done_event_data_t));
+
+    rmt_init();
+
+    // variables
     ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
     int command_lengths[CMD_COUNT] = {0};
     rmt_symbol_word_t tx_symbols[IR_LENGTH];
     bool captured = false;
     int cmd_index = 0;
-
+    bool sequence_sent = false;
     bool learning_mode = true;
+
+    IR_COMMANDS movie_mode[] = {
+        CMD_TURN_RED,
+        CMD_TURN_BLUE,
+        CMD_TURN_GREEN,
+    };
 
     while (1)
     {
@@ -133,20 +146,6 @@ void app_main(void)
             {
                 write_command(ir_commands, raw_symbols, command_lengths, count, curr_cmd_index);
 
-                
-                cmd_index++;
-
-
-                if (cmd_index >= CMD_COUNT)
-                {
-                    learning_mode = false;
-                    ESP_LOGI(TAG, "All commands captured!");
-                }
-            }
-
-            if (captured) // true for test -> !captured <-
-            {
-
                 send_command(tx_symbols,
                              ir_commands,
                              command_lengths,
@@ -154,12 +153,36 @@ void app_main(void)
                              copy_encoder,
                              &tx_trans_config,
                              curr_cmd_index);
-                captured = false;
+
+                cmd_index++;
+                ESP_LOGI(TAG, "Command %d", cmd_index);
+                if (cmd_index >= CMD_COUNT)
+                {
+                    learning_mode = false;
+                    ESP_LOGI(TAG, "All commands captured!");
+                }
+            }
+
+            if (!learning_mode && !sequence_sent) // true for test -> !captured <-
+            {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                send_sequence(tx_symbols,
+                              ir_commands,
+                              command_lengths,
+                              tx_channel,
+                              copy_encoder,
+                              &tx_trans_config,
+                              movie_mode,
+                              3,
+                              500);
+
+                sequence_sent = true;
             }
             else
             {
-                ESP_LOGI(TAG, "Frame ignored, already captured");
+                ESP_LOGI(TAG, "Frame ignored, learning not ended");
             }
+
             ESP_LOGI(TAG, "---- END FRAME ----");
 
             // важливо: знову запустити прийом

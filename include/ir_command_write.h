@@ -28,7 +28,13 @@ void send_command(rmt_symbol_word_t out[IR_LENGTH],
                   const rmt_transmit_config_t *conf,
                   IR_COMMANDS cmd_index);
 
-// send_sequence(sequence[], len, delay_ms)
+void send_sequence(rmt_symbol_word_t out[IR_LENGTH],
+                   ir_symbol_t buffer[CMD_COUNT][IR_LENGTH],
+                   int command_lengths[CMD_COUNT],
+                   rmt_channel_handle_t tx_channel,
+                   rmt_encoder_handle_t encoder,
+                   const rmt_transmit_config_t *conf,
+                   IR_COMMANDS sequence[], size_t len, int delay_ms);
 
 void write_command(ir_symbol_t to[CMD_COUNT][IR_LENGTH],
                    const rmt_symbol_word_t from[],
