@@ -1,0 +1,39 @@
+#ifndef ENUMS_H
+#define ENUMS_H
+
+typedef enum IR_COMMANDS
+{
+
+    CMD_POWER,
+    CMD_TURN_RED,
+    CMD_TURN_BLUE,
+    CMD_TURN_GREEN,
+    CMD_TURN_WHITE,
+    CMD_TURN_MOON,
+    CMD_TURN_STARS,
+    CMD_TURN_NORTHERN_LIGHTS,
+    CMD_BRIGHTNESS_UP,
+    CMD_BRIGHTNESS_DOWN,
+    CMD_TURN_BLUETOOTH,
+    CMD_MODE,
+
+    CMD_COUNT,
+} IR_COMMANDS;
+
+typedef enum
+{
+    APP_LEARNING,
+    APP_IDLE,
+    APP_RUNNING_SEQUENCE,
+    APP_SLEEP,
+} app_state_t;
+
+typedef enum
+{
+    EV_IR_RECEIVED,
+    EV_BUTTON_SHORT,
+    EV_BUTTON_LONG,
+    EV_SEQUENCE_DONE,
+} events_t;
+
+#endif

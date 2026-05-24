@@ -6,7 +6,7 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "driver/rmt_tx.h"
-#include "commands.h"
+#include "enums.h"
 
 #define IR_LENGTH 34
 

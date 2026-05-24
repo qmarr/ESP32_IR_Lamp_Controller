@@ -22,6 +22,13 @@ void send_command(rmt_symbol_word_t out[IR_LENGTH],
                   const rmt_transmit_config_t *conf,
                   IR_COMMANDS cmd_index)
 {
+
+    if (command_lengths[cmd_index] <= 0)
+    {
+        ESP_LOGW("SEND_COMMAND", "Command %d is not learned", cmd_index);
+        return;
+    }
+    
     build_tx_symbols_from_command(out, buffer, command_lengths, cmd_index);
 
     ESP_ERROR_CHECK(rmt_transmit(tx_channel, encoder, out, command_lengths[cmd_index] * sizeof(rmt_symbol_word_t), conf));
@@ -64,7 +71,7 @@ void write_command(ir_symbol_t to[CMD_COUNT][IR_LENGTH],
                  s.level0, s.duration0,
                  s.level1, s.duration1);
     }
-    
+
     command_lengths[cmd_index] = ir_length;
     ESP_LOGI(TAG_WRITE, "Command[%d] captured: %d symbols", cmd_index, command_lengths[cmd_index]);
 }

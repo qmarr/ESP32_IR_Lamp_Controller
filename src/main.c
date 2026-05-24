@@ -8,7 +8,7 @@
 #include "esp_timer.h"
 
 #include "ir_command_write.h"
-#include "commands.h"
+#include "enums.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -138,9 +138,7 @@ void app_main(void)
     ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
     int command_lengths[CMD_COUNT] = {0};
     rmt_symbol_word_t tx_symbols[IR_LENGTH];
-    int cmd_index = 0;
-    // bool sequence_sent = false;
-    bool learning_mode = true;
+    int learning_index = 0;
 
     // btn variables
     int last_btn_level = 1;
@@ -149,7 +147,20 @@ void app_main(void)
 
     int64_t btn_press_start_us = 0;
     bool long_press_handled = false;
-    // bool sequence_mode = false;
+
+    // sequence
+    IR_COMMANDS learning_order[] = {
+        CMD_TURN_RED,
+        CMD_TURN_BLUE,
+        CMD_TURN_GREEN,
+        CMD_TURN_WHITE,
+        CMD_TURN_NORTHERN_LIGHTS,
+        CMD_TURN_STARS,
+        CMD_TURN_MOON,
+        CMD_TURN_BLUETOOTH,
+    };
+
+    int learning_order_len = sizeof(learning_order) / sizeof(learning_order[0]);
 
     IR_COMMANDS movie_mode[] = {
         CMD_TURN_RED,
@@ -157,22 +168,30 @@ void app_main(void)
         CMD_TURN_GREEN,
     };
 
+    int movie_mode_len = sizeof(movie_mode) / sizeof(movie_mode[0]);
+
+    // states
+    app_state_t app_state = APP_LEARNING;
+
     while (1)
     {
-        rmt_rx_done_event_data_t rx_data;
 
-        if (xQueueReceive(ir_queue, &rx_data, pdMS_TO_TICKS(10)))
+        switch (app_state)
         {
-            int count = rx_data.num_symbols;
-            ESP_LOGI(TAG, "Frame received: symbols = %d", rx_data.num_symbols);
+        case APP_LEARNING:
+            rmt_rx_done_event_data_t rx_data;
 
-            if (count > 34) // to do something about IR_LENGTH later
-                count = 34;
-
-            int curr_cmd_index = cmd_index;
-            if (learning_mode)
+            if (xQueueReceive(ir_queue, &rx_data, pdMS_TO_TICKS(10)))
             {
-                write_command(ir_commands, raw_symbols, command_lengths, count, curr_cmd_index);
+                int count = rx_data.num_symbols;
+                ESP_LOGI(TAG, "Frame received: symbols = %d", rx_data.num_symbols);
+
+                if (count > IR_LENGTH) // to do something about IR_LENGTH later
+                    count = IR_LENGTH;
+
+                IR_COMMANDS cmd = learning_order[learning_index];
+
+                write_command(ir_commands, raw_symbols, command_lengths, count, cmd);
 
                 send_command(tx_symbols,
                              ir_commands,
@@ -180,83 +199,93 @@ void app_main(void)
                              tx_channel,
                              copy_encoder,
                              &tx_trans_config,
-                             curr_cmd_index);
+                             cmd);
 
-                cmd_index++;
-                ESP_LOGI(TAG, "Command %d", cmd_index);
-                if (cmd_index >= CMD_COUNT)
+                learning_index++;
+                ESP_LOGI(TAG, "Command %d", cmd);
+                if (learning_index >= learning_order_len)
                 {
-                    learning_mode = false;
+
+                    app_state = APP_IDLE;
                     ESP_LOGI(TAG, "All commands captured!");
                 }
+
+                ESP_LOGI(TAG, "---- END FRAME ----");
+
+                // важливо: знову запустити прийом
+                ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
+                                            sizeof(raw_symbols), &receive_config));
             }
-            ESP_LOGI(TAG, "---- END FRAME ----");
+            break;
 
-            // важливо: знову запустити прийом
-            ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
-                                        sizeof(raw_symbols), &receive_config));
-        }
+        case APP_IDLE:
+            vTaskDelay(pdMS_TO_TICKS(5));
+            // BTN + DEBOUNCE
+            int btn_level = gpio_get_level(BTN_GPIO_ENC);
+            int64_t now_us = esp_timer_get_time();
 
-        // BTN + DEBOUNCE
-        int btn_level = gpio_get_level(BTN_GPIO_ENC);
-        int64_t now_us = esp_timer_get_time();
-
-        if (btn_level != last_btn_level)
-        {
-            last_btn_level = btn_level;
-            last_btn_change_us = now_us;
-        }
-
-        if (now_us - last_btn_change_us > DEBOUNCE_US)
-        {
-            if (btn_level != stable_btn_level)
+            if (btn_level != last_btn_level)
             {
-                stable_btn_level = btn_level;
+                last_btn_level = btn_level;
+                last_btn_change_us = now_us;
+            }
 
-                if (stable_btn_level == 0)
+            if (now_us - last_btn_change_us > DEBOUNCE_US)
+            {
+                if (btn_level != stable_btn_level)
                 {
-                    btn_press_start_us = now_us;
-                    long_press_handled = false;
-                }
-                else
-                {
-                    if (!long_press_handled)
+                    stable_btn_level = btn_level;
+
+                    if (stable_btn_level == 0)
                     {
-                        // sequence_mode = !sequence_mode;
-                        // ESP_LOGI(TAG, "button short press: sequence mode = %d", sequence_mode);
-                        if (!learning_mode) // !sequence_sent
+                        btn_press_start_us = now_us;
+                        long_press_handled = false;
+                    }
+                    else
+                    {
+                        if (!long_press_handled)
                         {
-                            vTaskDelay(pdMS_TO_TICKS(500));
-                            send_sequence(tx_symbols,
-                                          ir_commands,
-                                          command_lengths,
-                                          tx_channel,
-                                          copy_encoder,
-                                          &tx_trans_config,
-                                          movie_mode,
-                                          3,
-                                          500);
-
-                            ESP_LOGI(TAG, "SHORT PRESS -> sending movie_mode sequence");
-                            // sequence_sent = true;
-                        }
-                        else
-                        {
-                            ESP_LOGI(TAG, "Frame ignored, learning not ended");
+                            if (app_state != APP_RUNNING_SEQUENCE)
+                            {
+                                app_state = APP_RUNNING_SEQUENCE;
+                            }
+                            else
+                            {
+                                ESP_LOGI(TAG, "Frame ignored, learning not ended");
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if (stable_btn_level == 0 &&
-            !long_press_handled &&
-            (now_us - btn_press_start_us) > BTN_LONG_PRESS * 1000ULL)
-        {
+            if (stable_btn_level == 0 &&
+                !long_press_handled &&
+                (now_us - btn_press_start_us) > BTN_LONG_PRESS * 1000ULL)
+            {
 
-            long_press_handled = true;
+                long_press_handled = true;
 
-            ESP_LOGI(TAG, "LONG BUTTON PRESS ->  smth sent");
+                ESP_LOGI(TAG, "LONG BUTTON PRESS ->  smth sent");
+            }
+            break;
+        case APP_RUNNING_SEQUENCE:
+
+            vTaskDelay(pdMS_TO_TICKS(500));
+            send_sequence(tx_symbols,
+                          ir_commands,
+                          command_lengths,
+                          tx_channel,
+                          copy_encoder,
+                          &tx_trans_config,
+                          movie_mode,
+                          movie_mode_len,
+                          500);
+
+            ESP_LOGI(TAG, "SHORT PRESS -> sent movie_mode sequence");
+            app_state = APP_IDLE;
+            break;
+        default:
+            break;
         }
     }
 }
