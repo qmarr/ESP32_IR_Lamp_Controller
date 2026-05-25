@@ -1,6 +1,6 @@
 
-#ifndef IR_COMMAND_WRITE_H
-#define IR_COMMAND_WRITE_H
+#ifndef IR_COMMANDS_H
+#define IR_COMMANDS_H
 #define TAG_WRITE "IR_SNIFFER_WRITE"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -34,7 +34,7 @@ void send_sequence(rmt_symbol_word_t out[IR_LENGTH],
                    rmt_channel_handle_t tx_channel,
                    rmt_encoder_handle_t encoder,
                    const rmt_transmit_config_t *conf,
-                   IR_COMMANDS sequence[], size_t len, int delay_ms);
+                   const IR_COMMANDS sequence[], size_t len, int delay_ms);
 
 void write_command(ir_symbol_t to[CMD_COUNT][IR_LENGTH],
                    const rmt_symbol_word_t from[],

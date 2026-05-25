@@ -1,4 +1,4 @@
-#include "ir_command_write.h"
+#include "ir_commands.h"
 
 void build_tx_symbols_from_command(rmt_symbol_word_t out[IR_LENGTH],
                                    ir_symbol_t buffer[CMD_COUNT][IR_LENGTH],
@@ -42,7 +42,7 @@ void send_sequence(rmt_symbol_word_t out[IR_LENGTH],
                    rmt_channel_handle_t tx_channel,
                    rmt_encoder_handle_t encoder,
                    const rmt_transmit_config_t *conf,
-                   IR_COMMANDS sequence[], size_t len, int delay_ms)
+                   const IR_COMMANDS sequence[], size_t len, int delay_ms)
 {
 
     for (size_t i = 0; i < len; i++)

@@ -7,8 +7,9 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 
-#include "ir_command_write.h"
+#include "ir_commands.h"
 #include "enums.h"
+#include "app_sequences.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -125,6 +126,7 @@ void encoder_init()
 
     ESP_ERROR_CHECK(gpio_config(&button_gpio_config));
 }
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "Starting IR sniffer...");
@@ -147,34 +149,11 @@ void app_main(void)
 
     int64_t btn_press_start_us = 0;
     bool long_press_handled = false;
-
-    // sequence
-    IR_COMMANDS learning_order[] = {
-        CMD_TURN_RED,
-        CMD_TURN_BLUE,
-        CMD_TURN_GREEN,
-        CMD_TURN_WHITE,
-        CMD_TURN_NORTHERN_LIGHTS,
-        CMD_TURN_STARS,
-        CMD_TURN_MOON,
-    };
-
-    int learning_order_len = sizeof(learning_order) / sizeof(learning_order[0]);
-
-    IR_COMMANDS movie_mode[] = {
-        CMD_TURN_RED,
-        CMD_TURN_BLUE,
-        CMD_TURN_GREEN,
-    };
-
-    int movie_mode_len = sizeof(movie_mode) / sizeof(movie_mode[0]);
-
     // states
     app_state_t app_state = APP_LEARNING;
 
     while (1)
     {
-
         switch (app_state)
         {
         case APP_LEARNING:
