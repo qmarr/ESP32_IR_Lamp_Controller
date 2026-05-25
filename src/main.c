@@ -17,7 +17,7 @@
 #define BTN_GPIO_ENC GPIO_NUM_4
 
 #define DEBOUNCE_US 50000 // 50ms
-#define BTN_LONG_PRESS 3000
+#define BTN_LONG_PRESS_MS 2000
 #define RMT_RESOLUTION_HZ 1000000 // 1us per tick
 
 #define MEM_BLOCK_SYMBOLS 64
@@ -157,7 +157,6 @@ void app_main(void)
         CMD_TURN_NORTHERN_LIGHTS,
         CMD_TURN_STARS,
         CMD_TURN_MOON,
-        CMD_TURN_BLUETOOTH,
     };
 
     int learning_order_len = sizeof(learning_order) / sizeof(learning_order[0]);
@@ -189,8 +188,17 @@ void app_main(void)
                 if (count > IR_LENGTH) // to do something about IR_LENGTH later
                     count = IR_LENGTH;
 
+                if (learning_index >= learning_order_len)
+                {
+                    app_state = APP_IDLE;
+                    break;
+                }
                 IR_COMMANDS cmd = learning_order[learning_index];
-
+                ESP_LOGI(TAG,
+                         "Learning step %d/%d: enum command id = %d",
+                         learning_index + 1,
+                         learning_order_len,
+                         cmd);
                 write_command(ir_commands, raw_symbols, command_lengths, count, cmd);
 
                 send_command(tx_symbols,
@@ -202,7 +210,7 @@ void app_main(void)
                              cmd);
 
                 learning_index++;
-                ESP_LOGI(TAG, "Command %d", cmd);
+
                 if (learning_index >= learning_order_len)
                 {
 
@@ -212,6 +220,7 @@ void app_main(void)
 
                 ESP_LOGI(TAG, "---- END FRAME ----");
 
+                vTaskDelay(pdMS_TO_TICKS(300));
                 // важливо: знову запустити прийом
                 ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
                                             sizeof(raw_symbols), &receive_config));
@@ -219,7 +228,7 @@ void app_main(void)
             break;
 
         case APP_IDLE:
-            vTaskDelay(pdMS_TO_TICKS(5));
+
             // BTN + DEBOUNCE
             int btn_level = gpio_get_level(BTN_GPIO_ENC);
             int64_t now_us = esp_timer_get_time();
@@ -249,10 +258,6 @@ void app_main(void)
                             {
                                 app_state = APP_RUNNING_SEQUENCE;
                             }
-                            else
-                            {
-                                ESP_LOGI(TAG, "Frame ignored, learning not ended");
-                            }
                         }
                     }
                 }
@@ -260,13 +265,15 @@ void app_main(void)
 
             if (stable_btn_level == 0 &&
                 !long_press_handled &&
-                (now_us - btn_press_start_us) > BTN_LONG_PRESS * 1000ULL)
+                (now_us - btn_press_start_us) > BTN_LONG_PRESS_MS * 1000ULL)
             {
 
                 long_press_handled = true;
 
-                ESP_LOGI(TAG, "LONG BUTTON PRESS ->  smth sent");
+                ESP_LOGI(TAG, "LONG BUTTON PRESS detected");
             }
+
+            vTaskDelay(pdMS_TO_TICKS(20));
             break;
         case APP_RUNNING_SEQUENCE:
 
@@ -285,7 +292,9 @@ void app_main(void)
             app_state = APP_IDLE;
             break;
         default:
+            app_state = APP_IDLE;
             break;
         }
+        vTaskDelay(1);
     }
 }
