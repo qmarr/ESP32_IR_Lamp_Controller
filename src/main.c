@@ -10,6 +10,7 @@
 #include "ir_commands.h"
 #include "enums.h"
 #include "app_sequences.h"
+#include "ir_storage.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -152,6 +153,22 @@ void app_main(void)
     // states
     app_state_t app_state = APP_LEARNING;
 
+    ESP_ERROR_CHECK(ir_storage_init());
+
+    if (ir_storage_load_required_commands(ir_commands,
+                                          command_lengths,
+                                          learning_order,
+                                          learning_order_len))
+    {
+        app_state = APP_IDLE;
+        ESP_LOGI(TAG, "Loaded commands from NVS. State -> APP_IDLE");
+    }
+    else
+    {
+        app_state = APP_LEARNING;
+        ESP_LOGI(TAG, "No saved commands. State -> APP_LEARNING");
+    }
+
     while (1)
     {
         switch (app_state)
@@ -180,6 +197,10 @@ void app_main(void)
                          cmd);
                 write_command(ir_commands, raw_symbols, command_lengths, count, cmd);
 
+
+                ESP_ERROR_CHECK(ir_storage_save_command(cmd,
+                                        ir_commands[cmd],
+                                        command_lengths[cmd]));
                 send_command(tx_symbols,
                              ir_commands,
                              command_lengths,

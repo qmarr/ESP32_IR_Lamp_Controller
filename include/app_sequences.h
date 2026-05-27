@@ -3,6 +3,8 @@
 
 #include "enums.h"
 
+extern const char *command_names[CMD_COUNT];
+
 extern const IR_COMMANDS learning_order[];
 extern const int learning_order_len;
 
