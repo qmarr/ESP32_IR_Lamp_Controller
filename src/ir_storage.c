@@ -108,3 +108,16 @@ bool ir_storage_load_required_commands(ir_symbol_t commands[CMD_COUNT][IR_LENGTH
     }
     return true;
 }
+
+esp_err_t ir_storage_erase_all_commands(void)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK)
+        return err;
+        
+    nvs_erase_all(handle);
+    nvs_commit(handle);
+
+    return err;
+}

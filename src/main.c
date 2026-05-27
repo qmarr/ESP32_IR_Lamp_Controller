@@ -190,17 +190,12 @@ void app_main(void)
                     break;
                 }
                 IR_COMMANDS cmd = learning_order[learning_index];
-                ESP_LOGI(TAG,
-                         "Learning step %d/%d: enum command id = %d",
-                         learning_index + 1,
-                         learning_order_len,
-                         cmd);
+                ESP_LOGI(TAG, "Learning command: %s", command_names[cmd]);
                 write_command(ir_commands, raw_symbols, command_lengths, count, cmd);
 
-
                 ESP_ERROR_CHECK(ir_storage_save_command(cmd,
-                                        ir_commands[cmd],
-                                        command_lengths[cmd]));
+                                                        ir_commands[cmd],
+                                                        command_lengths[cmd]));
                 send_command(tx_symbols,
                              ir_commands,
                              command_lengths,
@@ -270,14 +265,24 @@ void app_main(void)
 
                 long_press_handled = true;
 
-                ESP_LOGI(TAG, "LONG BUTTON PRESS detected");
+                ESP_LOGI(TAG, "LONG PRESS -> clearing NVS and entering learning mode");
+
+                ESP_ERROR_CHECK(ir_storage_erase_all_commands());
+
+                memset(command_lengths, 0, sizeof(command_lengths));
+
+                learning_index = 0;
+                app_state = APP_LEARNING;
+                // важливо: знову запустити прийом
+                ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
+                                            sizeof(raw_symbols), &receive_config));
             }
 
             vTaskDelay(pdMS_TO_TICKS(20));
             break;
         case APP_RUNNING_SEQUENCE:
 
-            vTaskDelay(pdMS_TO_TICKS(500));
+            vTaskDelay(pdMS_TO_TICKS(700));
             send_sequence(tx_symbols,
                           ir_commands,
                           command_lengths,

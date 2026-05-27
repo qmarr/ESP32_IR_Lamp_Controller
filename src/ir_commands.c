@@ -47,7 +47,7 @@ void send_sequence(rmt_symbol_word_t out[IR_LENGTH],
 
     for (size_t i = 0; i < len; i++)
     {
-        ESP_LOGI("Sequence", "Send command %d", i);
+        ESP_LOGI("Sequence", "Sequence command %d/%d: cmd=%d", i + 1, len, sequence[i]);
         send_command(out, buffer, command_lengths, tx_channel, encoder, conf, sequence[i]);
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }

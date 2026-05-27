@@ -30,5 +30,7 @@ bool ir_storage_load_required_commands(ir_symbol_t commands[CMD_COUNT][IR_LENGTH
                                        int lengths[CMD_COUNT],
                                        const IR_COMMANDS required[],
                                        int required_len);
+                                       
+esp_err_t ir_storage_erase_all_commands(void);
 
 #endif
