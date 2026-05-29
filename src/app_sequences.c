@@ -39,7 +39,7 @@ const IR_COMMANDS movie_mode[] = {
 const int movie_mode_len = sizeof(movie_mode) / sizeof(movie_mode[0]);
 
 const IR_COMMANDS dark_room_power_mode[] = {
-    CMD_POWER
+    CMD_POWER,
 };
 
 const int dark_room_power_mode_len = sizeof(dark_room_power_mode) / sizeof(dark_room_power_mode[0]);

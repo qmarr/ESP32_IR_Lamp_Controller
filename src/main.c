@@ -145,7 +145,6 @@ void app_main(void)
     bool lamp_assumed_on = false;
     bool room_dark = false;
     static int64_t last_ldr_check_us = 0;
-    // bool auto_power_sent = false;
 
     // btn variables
     int last_btn_level = 1;
@@ -251,7 +250,7 @@ void app_main(void)
                 int ldr_avg_value = adc_read_avg(adc_read_raw());
 
                 room_dark = room_is_dark(ldr_avg_value);
-                ESP_LOGI("ADC LDR", "avg=%d dark=%d", ldr_avg_value, room_dark);
+                ESP_LOGI("ADC LDR", "avg=%d dark=%d lamp assumed on =%d", ldr_avg_value, room_dark, lamp_assumed_on);
                 if (room_dark && !lamp_assumed_on)
                 {
                     app_state = APP_TURN_POWER_ON;
