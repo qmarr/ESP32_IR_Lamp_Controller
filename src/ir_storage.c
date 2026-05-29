@@ -115,9 +115,12 @@ esp_err_t ir_storage_erase_all_commands(void)
     esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK)
         return err;
-        
-    nvs_erase_all(handle);
-    nvs_commit(handle);
 
+    err = nvs_erase_all(handle);
+
+    if (err == ESP_OK)
+        err = nvs_commit(handle);
+
+    nvs_close(handle);
     return err;
 }

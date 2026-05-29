@@ -3,8 +3,6 @@
 
 typedef enum IR_COMMANDS
 {
-
-    CMD_POWER,
     CMD_TURN_RED,
     CMD_TURN_BLUE,
     CMD_TURN_GREEN,
@@ -14,7 +12,7 @@ typedef enum IR_COMMANDS
     CMD_TURN_NORTHERN_LIGHTS,
     CMD_BRIGHTNESS_DOWN,
     CMD_BRIGHTNESS_UP,
-    
+    CMD_POWER,
 
     CMD_COUNT,
 } IR_COMMANDS;
@@ -24,6 +22,7 @@ typedef enum
     APP_LEARNING,
     APP_IDLE,
     APP_RUNNING_SEQUENCE,
+    APP_TURN_POWER_ON,
     APP_SLEEP,
 } app_state_t;
 

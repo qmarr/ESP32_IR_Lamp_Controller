@@ -28,12 +28,12 @@ void send_command(rmt_symbol_word_t out[IR_LENGTH],
         ESP_LOGW("SEND_COMMAND", "Command %d is not learned", cmd_index);
         return;
     }
-    
+
     build_tx_symbols_from_command(out, buffer, command_lengths, cmd_index);
 
     ESP_ERROR_CHECK(rmt_transmit(tx_channel, encoder, out, command_lengths[cmd_index] * sizeof(rmt_symbol_word_t), conf));
 
-    ESP_ERROR_CHECK(rmt_tx_wait_all_done(tx_channel, portMAX_DELAY));
+    ESP_ERROR_CHECK(rmt_tx_wait_all_done(tx_channel, pdMS_TO_TICKS(1000)));
 }
 
 void send_sequence(rmt_symbol_word_t out[IR_LENGTH],

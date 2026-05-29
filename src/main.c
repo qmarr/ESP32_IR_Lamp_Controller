@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
@@ -11,6 +12,7 @@
 #include "enums.h"
 #include "app_sequences.h"
 #include "ir_storage.h"
+#include "ldr_sensor.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -21,6 +23,7 @@
 #define DEBOUNCE_US 50000 // 50ms
 #define BTN_LONG_PRESS_MS 2000
 #define RMT_RESOLUTION_HZ 1000000 // 1us per tick
+#define LDR_CHECK_US 500000       // 500ms
 
 #define MEM_BLOCK_SYMBOLS 64
 #define QUEUE_SIZE 4
@@ -74,13 +77,7 @@ void rmt_init()
     // 3. Enable channel
     ESP_ERROR_CHECK(rmt_enable(rx_channel));
 
-    // 4. Буфер для прийому
-
-    ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
-                                sizeof(raw_symbols), &receive_config));
-    //
-
-    // 5. Tx channel config
+    // 4. Tx channel config
     rmt_tx_channel_config_t tx_conf = {
         .gpio_num = IR_LED,
         .clk_src = RMT_CLK_SRC_DEFAULT,
@@ -93,7 +90,7 @@ void rmt_init()
 
     ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_conf, &tx_channel));
 
-    // 6. carrier config
+    // 5. carrier config
     rmt_carrier_config_t tx_carrier_cg = {
         .duty_cycle = 0.33,                 // duty cycle 33%
         .frequency_hz = 36000,              // 36 KHz
@@ -110,7 +107,7 @@ void rmt_init()
 
     // transmit
 
-    // 7. Enable tx channel
+    // 6. Enable tx channel
     ESP_ERROR_CHECK(rmt_enable(tx_channel));
 }
 
@@ -136,12 +133,19 @@ void app_main(void)
 
     rmt_init();
     encoder_init();
+    ldr_init();
 
     // variables
     ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
     int command_lengths[CMD_COUNT] = {0};
     rmt_symbol_word_t tx_symbols[IR_LENGTH];
     int learning_index = 0;
+    bool rmt_armed = false;
+    // ldr
+    bool lamp_assumed_on = false;
+    bool room_dark = false;
+    static int64_t last_ldr_check_us = 0;
+    // bool auto_power_sent = false;
 
     // btn variables
     int last_btn_level = 1;
@@ -174,10 +178,22 @@ void app_main(void)
         switch (app_state)
         {
         case APP_LEARNING:
+        {
+
             rmt_rx_done_event_data_t rx_data;
+            if (!rmt_armed)
+            {
+                // Буфер для прийому
+                ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
+                                            sizeof(raw_symbols), &receive_config));
+
+                rmt_armed = !rmt_armed;
+            }
 
             if (xQueueReceive(ir_queue, &rx_data, pdMS_TO_TICKS(10)))
             {
+                rmt_armed = false;
+
                 int count = rx_data.num_symbols;
                 ESP_LOGI(TAG, "Frame received: symbols = %d", rx_data.num_symbols);
 
@@ -210,23 +226,41 @@ void app_main(void)
                 {
 
                     app_state = APP_IDLE;
+                    rmt_armed = false;
                     ESP_LOGI(TAG, "All commands captured!");
+                }
+                else
+                {
+                    vTaskDelay(pdMS_TO_TICKS(300));
+                    // важливо: знову запустити прийом
+                    ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
+                                                sizeof(raw_symbols), &receive_config));
+                    rmt_armed = true;
                 }
 
                 ESP_LOGI(TAG, "---- END FRAME ----");
-
-                vTaskDelay(pdMS_TO_TICKS(300));
-                // важливо: знову запустити прийом
-                ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
-                                            sizeof(raw_symbols), &receive_config));
             }
             break;
-
+        }
         case APP_IDLE:
+        {
+            int64_t now_us = esp_timer_get_time();
+
+            if (now_us - last_ldr_check_us > LDR_CHECK_US)
+            {
+                int ldr_avg_value = adc_read_avg(adc_read_raw());
+
+                room_dark = room_is_dark(ldr_avg_value);
+                ESP_LOGI("ADC LDR", "avg=%d dark=%d", ldr_avg_value, room_dark);
+                if (room_dark && !lamp_assumed_on)
+                {
+                    app_state = APP_TURN_POWER_ON;
+                }
+                last_ldr_check_us = now_us;
+            }
 
             // BTN + DEBOUNCE
             int btn_level = gpio_get_level(BTN_GPIO_ENC);
-            int64_t now_us = esp_timer_get_time();
 
             if (btn_level != last_btn_level)
             {
@@ -272,16 +306,16 @@ void app_main(void)
                 memset(command_lengths, 0, sizeof(command_lengths));
 
                 learning_index = 0;
+                rmt_armed = false;
+                ESP_LOGI(TAG, "No saved commands. APP_LEARNING");
                 app_state = APP_LEARNING;
-                // важливо: знову запустити прийом
-                ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
-                                            sizeof(raw_symbols), &receive_config));
             }
 
             vTaskDelay(pdMS_TO_TICKS(20));
             break;
+        }
         case APP_RUNNING_SEQUENCE:
-
+        {
             vTaskDelay(pdMS_TO_TICKS(700));
             send_sequence(tx_symbols,
                           ir_commands,
@@ -292,13 +326,33 @@ void app_main(void)
                           movie_mode,
                           movie_mode_len,
                           500);
-
+            lamp_assumed_on = true;
             ESP_LOGI(TAG, "SHORT PRESS -> sent movie_mode sequence");
             app_state = APP_IDLE;
             break;
-        default:
+        }
+        case APP_TURN_POWER_ON:
+        {
+            vTaskDelay(pdMS_TO_TICKS(700));
+            send_sequence(tx_symbols,
+                          ir_commands,
+                          command_lengths,
+                          tx_channel,
+                          copy_encoder,
+                          &tx_trans_config,
+                          dark_room_power_mode,
+                          dark_room_power_mode_len,
+                          500);
+
+            lamp_assumed_on = true;
             app_state = APP_IDLE;
             break;
+        }
+        default:
+        {
+            app_state = APP_IDLE;
+            break;
+        }
         }
         vTaskDelay(1);
     }
