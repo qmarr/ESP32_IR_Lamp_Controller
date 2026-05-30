@@ -19,11 +19,14 @@
 #define RMT_RX_GPIO GPIO_NUM_15
 #define IR_LED GPIO_NUM_16
 #define BTN_GPIO_ENC GPIO_NUM_4
+#define ENC_DT_GPIO GPIO_NUM_38
+#define ENC_CLK_GPIO GPIO_NUM_39
 
 #define DEBOUNCE_US 50000 // 50ms
 #define BTN_LONG_PRESS_MS 2000
-#define RMT_RESOLUTION_HZ 1000000 // 1us per tick
-#define LDR_CHECK_US 500000       // 500ms
+#define RMT_RESOLUTION_HZ 1000000         // 1us per tick
+#define LDR_CHECK_US 500000               // 500ms
+#define ENCODER_ROTATE_COOLDOWN_US 300000 // 120 ms
 
 #define MEM_BLOCK_SYMBOLS 64
 #define QUEUE_SIZE 4
@@ -115,11 +118,12 @@ void encoder_init()
 {
     ESP_LOGI(TAG, "Encoder button init");
     gpio_config_t button_gpio_config = {
-        .pin_bit_mask = (1ULL << BTN_GPIO_ENC),
+        .pin_bit_mask = (1ULL << BTN_GPIO_ENC) |
+                        (1ULL << ENC_CLK_GPIO) |
+                        (1ULL << ENC_DT_GPIO),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
     };
 
     ESP_ERROR_CHECK(gpio_config(&button_gpio_config));
@@ -141,6 +145,11 @@ void app_main(void)
     rmt_symbol_word_t tx_symbols[IR_LENGTH];
     int learning_index = 0;
     bool rmt_armed = false;
+
+    // scene
+    scene_id_t selected_scene = SCENE_MOVIE;
+    scene_id_t active_scene = SCENE_MOVIE;
+    bool has_active_scene = false;
     // ldr
     bool lamp_assumed_on = false;
     bool room_dark = false;
@@ -153,6 +162,11 @@ void app_main(void)
 
     int64_t btn_press_start_us = 0;
     bool long_press_handled = false;
+
+    // encoder
+    int last_clk = 1;
+    static int64_t last_encoder_event_us = 0;
+
     // states
     app_state_t app_state = APP_LEARNING;
 
@@ -250,12 +264,34 @@ void app_main(void)
                 int ldr_avg_value = adc_read_avg(adc_read_raw());
 
                 room_dark = room_is_dark(ldr_avg_value);
-                ESP_LOGI("ADC LDR", "avg=%d dark=%d lamp assumed on =%d", ldr_avg_value, room_dark, lamp_assumed_on);
+                // ESP_LOGI("ADC LDR", "avg=%d dark=%d lamp assumed on =%d", ldr_avg_value, room_dark, lamp_assumed_on);
                 if (room_dark && !lamp_assumed_on)
                 {
                     app_state = APP_TURN_POWER_ON;
                 }
                 last_ldr_check_us = now_us;
+            }
+
+            int clk = gpio_get_level(ENC_CLK_GPIO);
+            int dt = gpio_get_level(ENC_DT_GPIO);
+            // ESP_LOGI(TAG, "ENC edge: clk=%d dt=%d", clk, dt);
+            if (last_clk == 1 && clk == 0)
+            {
+                if (now_us - last_encoder_event_us > ENCODER_ROTATE_COOLDOWN_US)
+                {
+                    last_encoder_event_us = now_us;
+
+                    if (dt == 1)
+                    {
+                        selected_scene = (selected_scene + 1) % SCENE_COUNT;
+                    }
+                    else
+                    {
+                        selected_scene = (selected_scene + SCENE_COUNT - 1) % SCENE_COUNT;
+                    }
+
+                    ESP_LOGI(TAG, "Selected scene: %s", scenes[selected_scene].name);
+                }
             }
 
             // BTN + DEBOUNCE
@@ -310,23 +346,58 @@ void app_main(void)
                 app_state = APP_LEARNING;
             }
 
-            vTaskDelay(pdMS_TO_TICKS(20));
+            vTaskDelay(pdMS_TO_TICKS(2));
             break;
         }
         case APP_RUNNING_SEQUENCE:
         {
+
             vTaskDelay(pdMS_TO_TICKS(700));
+            if (has_active_scene)
+            {
+                if (active_scene == selected_scene)
+                {
+                    ESP_LOGI(TAG, "Scene disabled: %s", scenes[active_scene].name);
+                    send_sequence(tx_symbols,
+                                  ir_commands,
+                                  command_lengths,
+                                  tx_channel,
+                                  copy_encoder,
+                                  &tx_trans_config,
+                                  scenes[active_scene].exit_sequence,
+                                  scenes[active_scene].exit_length,
+                                  500);
+
+                    has_active_scene = false;
+                    app_state = APP_IDLE;
+                    break;
+                }
+                ESP_LOGI(TAG, "Exiting scene: %s", scenes[active_scene].name);
+                send_sequence(tx_symbols,
+                              ir_commands,
+                              command_lengths,
+                              tx_channel,
+                              copy_encoder,
+                              &tx_trans_config,
+                              scenes[active_scene].exit_sequence,
+                              scenes[active_scene].exit_length,
+                              500);
+            }
+            ESP_LOGI(TAG, "Entering scene: %s", scenes[selected_scene].name);
+
+            //to do length check
             send_sequence(tx_symbols,
                           ir_commands,
                           command_lengths,
                           tx_channel,
                           copy_encoder,
                           &tx_trans_config,
-                          movie_mode,
-                          movie_mode_len,
+                          scenes[selected_scene].enter_sequence,
+                          scenes[selected_scene].enter_length,
                           500);
+            active_scene = selected_scene;
+            has_active_scene = true;
             lamp_assumed_on = true;
-            ESP_LOGI(TAG, "SHORT PRESS -> sent movie_mode sequence");
             app_state = APP_IDLE;
             break;
         }

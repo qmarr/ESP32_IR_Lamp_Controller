@@ -26,12 +26,6 @@ typedef enum
     APP_SLEEP,
 } app_state_t;
 
-typedef enum
-{
-    EV_IR_RECEIVED,
-    EV_BUTTON_SHORT,
-    EV_BUTTON_LONG,
-    EV_SEQUENCE_DONE,
-} events_t;
+
 
 #endif
