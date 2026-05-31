@@ -23,9 +23,8 @@ typedef enum
     APP_IDLE,
     APP_RUNNING_SEQUENCE,
     APP_TURN_POWER_ON,
+    APP_SLEEP_PREPARE,
     APP_SLEEP,
 } app_state_t;
-
-
 
 #endif

@@ -7,6 +7,7 @@
 #include "driver/rmt_tx.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "esp_sleep.h"
 
 #include "ir_commands.h"
 #include "enums.h"
@@ -26,7 +27,8 @@
 #define BTN_LONG_PRESS_MS 2000
 #define RMT_RESOLUTION_HZ 1000000         // 1us per tick
 #define LDR_CHECK_US 500000               // 500ms
-#define ENCODER_ROTATE_COOLDOWN_US 300000 // 120 ms
+#define ENCODER_ROTATE_COOLDOWN_US 500000 // 500ms
+#define SLEEP_TIMEOUT_US 60000000         // 60 seconds
 
 #define MEM_BLOCK_SYMBOLS 64
 #define QUEUE_SIZE 4
@@ -57,6 +59,8 @@ rmt_receive_config_t receive_config = {
     .signal_range_min_ns = 1000,
     .signal_range_max_ns = 10000000,
 };
+
+int64_t last_activity_us = 0;
 
 void rmt_init()
 {
@@ -129,6 +133,11 @@ void encoder_init()
     ESP_ERROR_CHECK(gpio_config(&button_gpio_config));
 }
 
+static void mark_activity()
+{
+    last_activity_us = esp_timer_get_time();
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "Starting IR sniffer...");
@@ -138,6 +147,7 @@ void app_main(void)
     rmt_init();
     encoder_init();
     ldr_init();
+    mark_activity();
 
     // variables
     ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
@@ -164,8 +174,10 @@ void app_main(void)
     bool long_press_handled = false;
 
     // encoder
-    int last_clk = 1;
+    int last_clk = gpio_get_level(ENC_CLK_GPIO);
     static int64_t last_encoder_event_us = 0;
+
+    // sleep mode
 
     // states
     app_state_t app_state = APP_LEARNING;
@@ -179,11 +191,13 @@ void app_main(void)
     {
         app_state = APP_IDLE;
         ESP_LOGI(TAG, "Loaded commands from NVS. State -> APP_IDLE");
+        mark_activity();
     }
     else
     {
         app_state = APP_LEARNING;
         ESP_LOGI(TAG, "No saved commands. State -> APP_LEARNING");
+        mark_activity();
     }
 
     while (1)
@@ -200,7 +214,7 @@ void app_main(void)
                 ESP_ERROR_CHECK(rmt_receive(rx_channel, raw_symbols,
                                             sizeof(raw_symbols), &receive_config));
 
-                rmt_armed = !rmt_armed;
+                rmt_armed = true;
             }
 
             if (xQueueReceive(ir_queue, &rx_data, pdMS_TO_TICKS(10)))
@@ -240,6 +254,7 @@ void app_main(void)
 
                     app_state = APP_IDLE;
                     rmt_armed = false;
+                    mark_activity();
                     ESP_LOGI(TAG, "All commands captured!");
                 }
                 else
@@ -259,6 +274,13 @@ void app_main(void)
         {
             int64_t now_us = esp_timer_get_time();
 
+            if (now_us - last_activity_us > SLEEP_TIMEOUT_US)
+            {
+                ESP_LOGI(TAG, "Idle timeout -> APP_SLEEP_PREPARE");
+                app_state = APP_SLEEP_PREPARE;
+                break;
+            }
+
             if (now_us - last_ldr_check_us > LDR_CHECK_US)
             {
                 int ldr_avg_value = adc_read_avg(adc_read_raw());
@@ -267,9 +289,11 @@ void app_main(void)
                 // ESP_LOGI("ADC LDR", "avg=%d dark=%d lamp assumed on =%d", ldr_avg_value, room_dark, lamp_assumed_on);
                 if (room_dark && !lamp_assumed_on)
                 {
+                    mark_activity();
                     app_state = APP_TURN_POWER_ON;
+                    break;
                 }
-                last_ldr_check_us = now_us;
+                last_ldr_check_us = now_us; //check behaviour later
             }
 
             int clk = gpio_get_level(ENC_CLK_GPIO);
@@ -284,10 +308,12 @@ void app_main(void)
                     if (dt == 1)
                     {
                         selected_scene = (selected_scene + 1) % SCENE_COUNT;
+                        mark_activity();
                     }
                     else
                     {
                         selected_scene = (selected_scene + SCENE_COUNT - 1) % SCENE_COUNT;
+                        mark_activity();
                     }
 
                     ESP_LOGI(TAG, "Selected scene: %s", scenes[selected_scene].name);
@@ -320,7 +346,9 @@ void app_main(void)
                         {
                             if (app_state != APP_RUNNING_SEQUENCE)
                             {
+                                mark_activity();
                                 app_state = APP_RUNNING_SEQUENCE;
+                                break;
                             }
                         }
                     }
@@ -343,7 +371,9 @@ void app_main(void)
                 learning_index = 0;
                 rmt_armed = false;
                 ESP_LOGI(TAG, "No saved commands. APP_LEARNING");
+                mark_activity();
                 app_state = APP_LEARNING;
+                xQueueReset(ir_queue);
             }
 
             vTaskDelay(pdMS_TO_TICKS(2));
@@ -351,7 +381,7 @@ void app_main(void)
         }
         case APP_RUNNING_SEQUENCE:
         {
-
+            mark_activity();
             vTaskDelay(pdMS_TO_TICKS(700));
             if (has_active_scene)
             {
@@ -385,7 +415,7 @@ void app_main(void)
             }
             ESP_LOGI(TAG, "Entering scene: %s", scenes[selected_scene].name);
 
-            //to do length check
+            // to do length check
             send_sequence(tx_symbols,
                           ir_commands,
                           command_lengths,
@@ -403,6 +433,7 @@ void app_main(void)
         }
         case APP_TURN_POWER_ON:
         {
+            ESP_LOGI(TAG, "Turning power on");
             vTaskDelay(pdMS_TO_TICKS(700));
             send_sequence(tx_symbols,
                           ir_commands,
@@ -413,8 +444,22 @@ void app_main(void)
                           dark_room_power_mode,
                           dark_room_power_mode_len,
                           500);
-
+            mark_activity();
             lamp_assumed_on = true;
+            app_state = APP_IDLE;
+            break;
+        }
+        case APP_SLEEP_PREPARE:
+        {
+            ESP_LOGI(TAG, "Preparing to enter sleep");
+            app_state = APP_SLEEP;
+            break;
+        }
+        case APP_SLEEP:
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            ESP_LOGI(TAG, "Sleep mode");
+            mark_activity();
             app_state = APP_IDLE;
             break;
         }
