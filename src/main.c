@@ -7,13 +7,14 @@
 #include "driver/rmt_tx.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
-#include "esp_sleep.h"
+
 
 #include "ir_commands.h"
 #include "enums.h"
 #include "app_sequences.h"
 #include "ir_storage.h"
 #include "ldr_sensor.h"
+#include "sleep.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -28,7 +29,7 @@
 #define RMT_RESOLUTION_HZ 1000000         // 1us per tick
 #define LDR_CHECK_US 500000               // 500ms
 #define ENCODER_ROTATE_COOLDOWN_US 500000 // 500ms
-#define SLEEP_TIMEOUT_US 60000000         // 60 seconds
+#define SLEEP_TIMEOUT_US 40000000         // 40 seconds
 
 #define MEM_BLOCK_SYMBOLS 64
 #define QUEUE_SIZE 4
@@ -457,8 +458,8 @@ void app_main(void)
         }
         case APP_SLEEP:
         {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            ESP_LOGI(TAG, "Sleep mode");
+            enter_light_sleep(BTN_GPIO_ENC);   
+        
             mark_activity();
             app_state = APP_IDLE;
             break;
