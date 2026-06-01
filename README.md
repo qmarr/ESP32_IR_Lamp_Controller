@@ -3,9 +3,7 @@
 ## IR Lamp Controller is an ESP32-S3 based embedded project for controlling an ambient lamp through infrared commands.
 
 
-The controller learns IR commands from the original remote, stores them in NVS flash memory, and replays them using an IR LED. This allows simple remote commands to be combined into higher-level lighting scenes.
-
-The project is built with ESP-IDF and focuses on embedded firmware architecture, IR signal handling, persistent storage, finite state machine design, sensor-based automation, and low-power behavior.
+The controller learns IR commands from the original remote, stores them in NVS flash memory, and replays them using an IR LED. This allows simple remote commands to be combined into more complex scenes.
 
 The project is built with ESP-IDF and focuses on embedded firmware architecture, IR signal handling, persistent storage, finite state machine design, sensor-based automation, and low-power behavior.
 
@@ -13,12 +11,12 @@ The project is built with ESP-IDF and focuses on embedded firmware architecture,
 ## Features
 * IR command learning from the original remote
 * IR command replay using an IR LED
-* Persistent command storage in NVS flash
+* Command storage in NVS flash
 * Scene selection using a rotary encoder
-* Scene enter/exit logic to avoid overlapping modes
-* LDR-based automatic lamp power-on when the room becomes dark
+* Scene enter/exit logic to avoid overlapping
+* LDR-based automatic lamp power-on
 * Light sleep mode after inactivity
-* Long press reset to clear learned commands and re-enter learning mode
+* Long press reset learned commands and enters learning mode
 * FSM-based application structure
 
 ## Workflow
@@ -28,9 +26,9 @@ If commands are missing, the controller enters learning mode. In this mode, the 
 
 After learning is complete, the controller enters idle mode. From this state, the user can select scenes using the rotary encoder and run the selected scene with a short press. A long press clears saved IR commands and returns the device to learning mode.
 
-The LDR sensor is used to detect low ambient light. When the room becomes dark enough and the lamp is assumed to be off, the controller sends the power command automatically.
+The LDR sensor is used to detect when to send command to power ambient lamp. When the room becomes dark enough and the lamp is assumed to be off, the controller sends the power command automatically.
 
-After a period of inactivity, the controller enters light sleep mode and wakes up using the encoder button.
+After a period of inactivity, the controller enters light sleep mode. User can wake it up using encoder button.
 
 
 ## States diagram
@@ -50,9 +48,14 @@ stateDiagram-v2
     APP_SLEEP --> APP_IDLE: wake by encoder button
 ```
 
+## Schematic
+[schematic placeholder]()
 
 ## Video
-[placeholder]() 
+[video placeholder]() 
+
+## PCB Layout
+[PCB layout placeholder]()
 
 
 ## Usage
