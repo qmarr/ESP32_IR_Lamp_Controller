@@ -58,7 +58,7 @@ const IR_COMMANDS tension_mode[] = {
 
 const scene_t scenes[SCENE_COUNT] = {
     [SCENE_FAVOURITE] = {
-        .name = "Favourite",
+        .name = "Fav",
         .enter_sequence = favourite_mode,
         .enter_length = sizeof(favourite_mode) / sizeof(favourite_mode[0]),
         .exit_sequence = favourite_mode,

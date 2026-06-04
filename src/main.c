@@ -8,13 +8,13 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 
-
 #include "ir_commands.h"
 #include "enums.h"
 #include "app_sequences.h"
 #include "ir_storage.h"
 #include "ldr_sensor.h"
 #include "sleep.h"
+#include "display.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -30,6 +30,7 @@
 #define LDR_CHECK_US 500000               // 500ms
 #define ENCODER_ROTATE_COOLDOWN_US 500000 // 500ms
 #define SLEEP_TIMEOUT_US 40000000         // 40 seconds
+#define DISPLAY_UPDATE_US 500000
 
 #define MEM_BLOCK_SYMBOLS 64
 #define QUEUE_SIZE 4
@@ -60,6 +61,9 @@ rmt_receive_config_t receive_config = {
     .signal_range_min_ns = 1000,
     .signal_range_max_ns = 10000000,
 };
+
+i2c_master_bus_handle_t bus_handle;
+i2c_master_dev_handle_t oled_dev_handle;
 
 int64_t last_activity_us = 0;
 
@@ -134,6 +138,28 @@ void encoder_init()
     ESP_ERROR_CHECK(gpio_config(&button_gpio_config));
 }
 
+void i2c_init()
+{
+    i2c_master_bus_config_t i2c_mst_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_NUM_0,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
+
+    i2c_device_config_t oled_dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = OLED_ADDR,
+        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
+    };
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &oled_dev_cfg, &oled_dev_handle));
+}
+
 static void mark_activity()
 {
     last_activity_us = esp_timer_get_time();
@@ -148,6 +174,9 @@ void app_main(void)
     rmt_init();
     encoder_init();
     ldr_init();
+    i2c_init();
+    ssd1306_init(oled_dev_handle);
+    ssd1306_clear(oled_dev_handle);
     mark_activity();
 
     // variables
@@ -156,6 +185,11 @@ void app_main(void)
     rmt_symbol_word_t tx_symbols[IR_LENGTH];
     int learning_index = 0;
     bool rmt_armed = false;
+
+
+    //display
+    static int64_t last_display_update_us = 0;
+    static int last_displayed_learning_index = -1;
 
     // scene
     scene_id_t selected_scene = SCENE_MOVIE;
@@ -218,6 +252,26 @@ void app_main(void)
                 rmt_armed = true;
             }
 
+            if (learning_index >= learning_order_len)
+            {
+                app_state = APP_IDLE;
+                break;
+            }
+
+            IR_COMMANDS cmd = learning_order[learning_index];
+            if (last_displayed_learning_index != learning_index)
+            {
+                IR_COMMANDS cmd = learning_order[learning_index];
+
+                ssd1306_clear(oled_dev_handle);
+                display_show_learning(oled_dev_handle,
+                                      command_names[cmd],
+                                      learning_index + 1,
+                                      learning_order_len);
+
+                last_displayed_learning_index = learning_index;
+            }
+
             if (xQueueReceive(ir_queue, &rx_data, pdMS_TO_TICKS(10)))
             {
                 rmt_armed = false;
@@ -228,12 +282,6 @@ void app_main(void)
                 if (count > IR_LENGTH) // to do something about IR_LENGTH later
                     count = IR_LENGTH;
 
-                if (learning_index >= learning_order_len)
-                {
-                    app_state = APP_IDLE;
-                    break;
-                }
-                IR_COMMANDS cmd = learning_order[learning_index];
                 ESP_LOGI(TAG, "Learning command: %s", command_names[cmd]);
                 write_command(ir_commands, raw_symbols, command_lengths, count, cmd);
 
@@ -274,6 +322,12 @@ void app_main(void)
         case APP_IDLE:
         {
             int64_t now_us = esp_timer_get_time();
+            // display
+            if (now_us - last_display_update_us > DISPLAY_UPDATE_US)
+            {
+                display_show_idle(oled_dev_handle, scenes[selected_scene].name, has_active_scene ? scenes[active_scene].name : "None", lamp_assumed_on, room_dark);
+                last_display_update_us = now_us;
+            }
 
             if (now_us - last_activity_us > SLEEP_TIMEOUT_US)
             {
@@ -294,7 +348,7 @@ void app_main(void)
                     app_state = APP_TURN_POWER_ON;
                     break;
                 }
-                last_ldr_check_us = now_us; //check behaviour later
+                last_ldr_check_us = now_us; // check behaviour later
             }
 
             int clk = gpio_get_level(ENC_CLK_GPIO);
@@ -458,8 +512,10 @@ void app_main(void)
         }
         case APP_SLEEP:
         {
-            enter_light_sleep(BTN_GPIO_ENC);   
-        
+            ssd1306_clear(oled_dev_handle);
+            display_show_sleep(oled_dev_handle);
+            enter_light_sleep(BTN_GPIO_ENC);
+            ssd1306_clear(oled_dev_handle);
             mark_activity();
             app_state = APP_IDLE;
             break;

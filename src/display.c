@@ -1,41 +1,14 @@
 #include "display.h"
 
-static i2c_master_bus_handle_t bus_handle;
-static i2c_master_dev_handle_t oled_dev_handle;
-
-void display_init(void)
-{
-    i2c_master_bus_config_t i2c_mst_config = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
-
-    i2c_device_config_t oled_dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = OLED_ADDR,
-        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
-    };
-
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &oled_dev_cfg, &oled_dev_handle));
-
-}
-
-
 esp_err_t ssd1306_cmd(i2c_master_dev_handle_t dev, uint8_t cmd)
 {
     uint8_t buf[2] = {0x00, cmd};
-    return i2c_master_transmit(dev, buf, sizeof(buf), -1);
+    return i2c_master_transmit(dev, buf, sizeof(buf), OLED_I2C_TIMEOUT_MS);
 }
 esp_err_t ssd1306_cmd2(i2c_master_dev_handle_t dev, uint8_t cmd, uint8_t arg)
 {
     uint8_t buf[3] = {0x00, cmd, arg};
-    return i2c_master_transmit(dev, buf, sizeof(buf), -1);
+    return i2c_master_transmit(dev, buf, sizeof(buf), OLED_I2C_TIMEOUT_MS);
 }
 
 esp_err_t ssd1306_data(i2c_master_dev_handle_t dev, const uint8_t *data, size_t len)
@@ -53,7 +26,7 @@ esp_err_t ssd1306_data(i2c_master_dev_handle_t dev, const uint8_t *data, size_t 
         buf[i + 1] = data[i];
     }
 
-    return i2c_master_transmit(dev, buf, len + 1, -1);
+    return i2c_master_transmit(dev, buf, len + 1, OLED_I2C_TIMEOUT_MS);
 }
 
 void ssd1306_init(i2c_master_dev_handle_t dev)
@@ -101,7 +74,12 @@ void ssd1306_clear(i2c_master_dev_handle_t dev)
 
     for (int page = 0; page < 8; ++page)
     {
-        ESP_ERROR_CHECK(ssd1306_data(dev, zeros, sizeof(zeros)));
+        esp_err_t err = ssd1306_data(dev, zeros, sizeof(zeros));
+        if (err != ESP_OK)
+        {
+            ESP_LOGW("DISPLAY", "OLED clear failed: %s", esp_err_to_name(err));
+            return;
+        }
     }
 }
 
@@ -119,12 +97,21 @@ void ssd1306_draw_char(i2c_master_dev_handle_t dev, char c)
 {
     const uint8_t *bitmap = get_char_bitmap(c);
 
-    ESP_ERROR_CHECK(ssd1306_data(dev, bitmap, 5));
+    esp_err_t err = ssd1306_data(dev, bitmap, 5);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW("DISPLAY", "OLED draw failed: %s", esp_err_to_name(err));
+        return;
+    }
 
     uint8_t spacing = 0x00;
-    ESP_ERROR_CHECK(ssd1306_data(dev, &spacing, 1));
+    err = ssd1306_data(dev, &spacing, 1);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW("DISPLAY", "OLED draw failed: %s", esp_err_to_name(err));
+        return;
+    }
 }
-
 void ssd1306_draw_string(i2c_master_dev_handle_t dev, const char *str)
 {
 
@@ -146,9 +133,24 @@ void ssd1306_set_cursor(i2c_master_dev_handle_t dev, uint8_t page, uint8_t col)
         col = 127;
     }
 
-    ESP_ERROR_CHECK(ssd1306_cmd(dev, 0xB0 | page));                // page 0..7
-    ESP_ERROR_CHECK(ssd1306_cmd(dev, 0x00 | (col & 0x0F)));        // lower column
-    ESP_ERROR_CHECK(ssd1306_cmd(dev, 0x10 | ((col >> 4) & 0x0F))); // higher column
+    esp_err_t err = ssd1306_cmd(dev, 0xB0 | page); // page 0..7
+    if (err != ESP_OK)
+    {
+        ESP_LOGW("DISPLAY", "Set cursor failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = ssd1306_cmd(dev, 0x00 | (col & 0x0F)); // lower column
+    if (err != ESP_OK)
+    {
+        ESP_LOGW("DISPLAY", "Set cursor failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = ssd1306_cmd(dev, 0x10 | ((col >> 4) & 0x0F)); // higher column
+    if (err != ESP_OK)
+    {
+        ESP_LOGW("DISPLAY", "Set cursor failed: %s", esp_err_to_name(err));
+        return;
+    }
 }
 
 void ssd1306_print_at(i2c_master_dev_handle_t dev, uint8_t page, uint8_t col, const char *text)
@@ -162,7 +164,49 @@ void ssd1306_clear_line(i2c_master_dev_handle_t dev, uint8_t page)
     uint8_t zeros[128] = {0x00};
 
     ssd1306_set_cursor(dev, page, 0);
-    ESP_ERROR_CHECK(ssd1306_data(dev, zeros, sizeof(zeros)));
+    esp_err_t err = ssd1306_data(dev, zeros, sizeof(zeros));
+    if (err != ESP_OK)
+    {
+        ESP_LOGW("DISPLAY", "OLED clear ln failed: %s", esp_err_to_name(err));
+        return;
+    }
 }
 
+void display_show_idle(i2c_master_dev_handle_t oled_handle, const char *selected_scene, const char *active_scene, bool lamp_on, bool room_dark)
+{
 
+    char line1[22];
+    char line2[22];
+    char line3[22];
+    char line4[22];
+
+    snprintf(line1, sizeof(line1), "Select: %s", selected_scene);
+    snprintf(line2, sizeof(line2), "Prev: %s", active_scene);
+    snprintf(line3, sizeof(line3), "Lamp is: %s", (lamp_on) ? "ON" : "OFF");
+    snprintf(line4, sizeof(line4), "Room is: %s", (room_dark) ? "Dark" : "Lighted");
+
+    ssd1306_clear_line(oled_handle, 1);
+    ssd1306_clear_line(oled_handle, 2);
+    ssd1306_clear_line(oled_handle, 3);
+    ssd1306_clear_line(oled_handle, 4);
+
+    ssd1306_print_at(oled_handle, 1, 0, line1);
+    ssd1306_print_at(oled_handle, 2, 0, line2);
+    ssd1306_print_at(oled_handle, 3, 0, line3);
+    ssd1306_print_at(oled_handle, 4, 0, line4);
+}
+
+void display_show_learning(i2c_master_dev_handle_t oled_handle, const char *command_name, int step, int total)
+{
+    char line1[22];
+    snprintf(line1, sizeof(line1), "[%d/%d]Push: %s", step, total, command_name);
+    ssd1306_print_at(oled_handle, 1, 0, "LEARNING STATE");
+    ssd1306_print_at(oled_handle, 2, 0, line1);
+}
+
+void display_show_sleep(i2c_master_dev_handle_t oled_handle)
+{
+    ssd1306_print_at(oled_handle, 4, 0, "I'm sleeping");
+    ssd1306_print_at(oled_handle, 5, 0, "Press btn");
+    ssd1306_print_at(oled_handle, 6, 0, "to wake me up");
+}
