@@ -5,9 +5,32 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_mac.h"
+#include "esp_http_server.h"
+
 #include "lwip/err.h"
 #include "lwip/sys.h"
 static const char *TAG = "wifi softAP";
+static QueueHandle_t web_request_queue = NULL;
+static const char root_html[] =
+    "<!DOCTYPE html>"
+    "<html>"
+    "<head>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<title>IR Lamp Controller</title>"
+    "</head>"
+    "<body>"
+    "<h1>IR Lamp Controller</h1>"
+
+    "<p>Scenes:</p>"
+    "<a href='/scene/favourite'><button>Favourite</button></a><br><br>"
+    "<a href='/scene/ocean'><button>Ocean</button></a><br><br>"
+    "<a href='/scene/tension'><button>Tension</button></a><br><br>"
+    "<a href='/scene/movie'><button>Movie</button></a><br><br>"
+    "<p>Control:</p>"
+    "<a href='/power'><button>Power</button></a>"
+
+    "</body>"
+    "</html>";
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -27,6 +50,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 }
 
 static void wifi_init_softap(void)
+
 {
     ESP_ERROR_CHECK(esp_netif_init());
     esp_err_t err = esp_event_loop_create_default();
@@ -78,8 +102,180 @@ static void wifi_init_softap(void)
              ESP_WIFI_SSID, ESP_WIFI_PASS, ESP_WIFI_CHANNEL);
 }
 
-void web_ui_start()
+static esp_err_t root_get_handler(httpd_req_t *req)
 {
 
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, root_html, HTTPD_RESP_USE_STRLEN);
+
+    return ESP_OK;
+}
+
+static esp_err_t scene_favourite_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "WEB: Favourite pressed");
+
+    if (web_request_queue != NULL)
+    {
+        web_request_t web_req = {
+            .type = WEB_REQ_RUN_SCENE,
+            .scene = SCENE_FAVOURITE,
+        };
+
+        xQueueSend(web_request_queue, &web_req, 0);
+    }
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t scene_ocean_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "WEB: Ocean pressed");
+
+    if (web_request_queue != NULL)
+    {
+        web_request_t web_req = {
+            .type = WEB_REQ_RUN_SCENE,
+            .scene = SCENE_OCEAN,
+        };
+
+        xQueueSend(web_request_queue, &web_req, 0);
+    }
+
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_send(req, NULL, 0);
+
+    return ESP_OK;
+}
+static esp_err_t tension_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "WEB: Tension pressed");
+    if (web_request_queue != NULL)
+    {
+        web_request_t web_req = {
+            .type = WEB_REQ_RUN_SCENE,
+            .scene = SCENE_TENSION,
+        };
+
+        xQueueSend(web_request_queue, &web_req, 0);
+    }
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_send(req, NULL, 0);
+
+    return ESP_OK;
+}
+static esp_err_t power_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "WEB: Power pressed");
+
+    if (web_request_queue != NULL)
+    {
+        web_request_t web_req = {
+            .type = WEB_REQ_POWER_TOGGLE,
+        };
+
+        xQueueSend(web_request_queue, &web_req, 0);
+    }
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_send(req, NULL, 0);
+
+    return ESP_OK;
+}
+static esp_err_t movie_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "WEB: Movie pressed");
+
+    if (web_request_queue != NULL)
+    {
+        web_request_t web_req = {
+            .type = WEB_REQ_RUN_SCENE,
+            .scene = SCENE_MOVIE,
+        };
+
+        xQueueSend(web_request_queue, &web_req, 0);
+    }
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_send(req, NULL, 0);
+
+    return ESP_OK;
+}
+
+static const httpd_uri_t root_uri = {
+    .uri = "/",
+    .method = HTTP_GET,
+    .handler = root_get_handler,
+    .user_ctx = NULL,
+};
+
+static httpd_uri_t favourite_uri = {
+    .uri = "/scene/favourite",
+    .method = HTTP_GET,
+    .handler = scene_favourite_handler,
+    .user_ctx = NULL,
+};
+
+static const httpd_uri_t scene_ocean_uri = {
+    .uri = "/scene/ocean",
+    .method = HTTP_GET,
+    .handler = scene_ocean_handler,
+    .user_ctx = NULL,
+};
+
+static const httpd_uri_t tension_uri = {
+    .uri = "/scene/tension",
+    .method = HTTP_GET,
+    .handler = tension_handler,
+    .user_ctx = NULL,
+};
+static const httpd_uri_t movie_uri = {
+    .uri = "/scene/movie",
+    .method = HTTP_GET,
+    .handler = movie_handler,
+    .user_ctx = NULL,
+};
+static const httpd_uri_t power_uri = {
+    .uri = "/power",
+    .method = HTTP_GET,
+    .handler = power_handler,
+    .user_ctx = NULL,
+};
+
+static httpd_handle_t start_webserver(void)
+{
+    httpd_handle_t server = NULL;
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+
+    ESP_LOGI(TAG, "Starting HTTP server on port %d", config.server_port);
+
+    esp_err_t err = httpd_start(&server, &config);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(err));
+        return NULL;
+    }
+
+    httpd_register_uri_handler(server, &root_uri);
+    httpd_register_uri_handler(server, &favourite_uri);
+    httpd_register_uri_handler(server, &scene_ocean_uri);
+    httpd_register_uri_handler(server, &tension_uri);
+    httpd_register_uri_handler(server, &movie_uri);
+    httpd_register_uri_handler(server, &power_uri);
+
+    ESP_LOGI(TAG, "HTTP server started");
+
+    return server;
+}
+
+void web_ui_start(QueueHandle_t queue)
+{
+    web_request_queue = queue;
+
     wifi_init_softap();
+    start_webserver();
 }

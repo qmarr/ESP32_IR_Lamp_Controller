@@ -182,8 +182,6 @@ void app_main(void)
     i2c_init();
     ssd1306_init(oled_dev_handle);
     ssd1306_clear(oled_dev_handle);
-    ESP_LOGI(TAG, "Main stack high watermark: %u",
-             uxTaskGetStackHighWaterMark(NULL));
     mark_activity();
 
     // variables
@@ -226,12 +224,17 @@ void app_main(void)
     // web_request_queue = xQueueCreate(5, sizeof(web_request_t));
 
     ESP_ERROR_CHECK(ir_storage_init());
-    ESP_LOGI(TAG, "Main stack high watermark: %u",
-             uxTaskGetStackHighWaterMark(NULL));
+
     // wifi
-    web_ui_start();
-    ESP_LOGI(TAG, "Main stack high watermark: %u",
-             uxTaskGetStackHighWaterMark(NULL));
+    QueueHandle_t web_queue = xQueueCreate(5, sizeof(web_request_t));
+    if (web_queue == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to create web request queue");
+    }
+    else
+    {
+        web_ui_start(web_queue);
+    }
 
     if (ir_storage_load_required_commands(ir_commands,
                                           command_lengths,
@@ -336,6 +339,31 @@ void app_main(void)
         case APP_IDLE:
         {
             int64_t now_us = esp_timer_get_time();
+
+            web_request_t web_req;
+
+            if (xQueueReceive(web_queue, &web_req, 0))
+            {
+                mark_activity();
+
+                switch (web_req.type)
+                {
+                case WEB_REQ_RUN_SCENE:
+                    selected_scene = web_req.scene;
+                    app_state = APP_RUNNING_SEQUENCE;
+                    break;
+
+                case WEB_REQ_POWER_TOGGLE:
+                    app_state = APP_TURN_POWER_ON;
+                    break;
+
+                default:
+                    break;
+                }
+
+                break;
+            }
+
             // display
             if (now_us - last_display_update_us > DISPLAY_UPDATE_US)
             {

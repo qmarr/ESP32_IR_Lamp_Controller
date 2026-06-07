@@ -2,6 +2,8 @@
 #define WIFI_UI_H
 
 #include "app_sequences.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 
 #define ESP_WIFI_SSID "IR_Lamp_Controller"
@@ -30,6 +32,6 @@ typedef struct
 } web_request_t;
 
 
-void web_ui_start();
+void web_ui_start(QueueHandle_t queue);
 
 #endif // WIFI_UI_H
