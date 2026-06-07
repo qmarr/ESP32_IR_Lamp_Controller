@@ -16,6 +16,7 @@
 #include "sleep.h"
 #include "display.h"
 #include "wifi_ui.h"
+#include "app_status.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -169,6 +170,37 @@ static void mark_activity()
 {
     last_activity_us = esp_timer_get_time();
 }
+// state
+static app_state_t app_state = APP_LEARNING;
+// scenes
+static scene_id_t selected_scene = SCENE_MOVIE;
+static scene_id_t active_scene = SCENE_MOVIE;
+static bool has_active_scene = false;
+// ldr
+static bool lamp_assumed_on = false;
+static bool room_dark = false;
+
+static SemaphoreHandle_t app_status_mutex = NULL;
+static app_status_t app_status = {0};
+
+static void update_app_status(void)
+{
+    if (app_status_mutex == NULL)
+    {
+        return;
+    }
+    if (xSemaphoreTake(app_status_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    {
+        app_status.app_state = app_state;
+        app_status.selected_scene = selected_scene;
+        app_status.active_scene = active_scene;
+        app_status.has_active_scene = has_active_scene;
+        app_status.lamp_assumed_on = lamp_assumed_on;
+        app_status.room_dark = room_dark;
+
+        xSemaphoreGive(app_status_mutex);
+    }
+}
 
 void app_main(void)
 {
@@ -192,13 +224,7 @@ void app_main(void)
     static int64_t last_display_update_us = 0;
     static int last_displayed_learning_index = -1;
 
-    // scene
-    scene_id_t selected_scene = SCENE_MOVIE;
-    scene_id_t active_scene = SCENE_MOVIE;
-    bool has_active_scene = false;
     // ldr
-    bool lamp_assumed_on = false;
-    bool room_dark = false;
     static int64_t last_ldr_check_us = 0;
 
     // btn variables
@@ -215,25 +241,34 @@ void app_main(void)
 
     // sleep mode
 
-    // states
-    app_state_t app_state = APP_LEARNING;
-
     // WIFI
     static bool web_ui_enabled = true;
-    // QueueHandle_t web_request_queue = NULL;
-    // web_request_queue = xQueueCreate(5, sizeof(web_request_t));
 
+    // nvs
     ESP_ERROR_CHECK(ir_storage_init());
 
-    // wifi
+    // status
+    app_status_mutex = xSemaphoreCreateMutex();
+
+    if (app_status_mutex == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to create app status mutex");
+    }
+
     QueueHandle_t web_queue = xQueueCreate(5, sizeof(web_request_t));
+
+    update_app_status();
+
+    web_ui_start(web_queue, &app_status, app_status_mutex);
+
+    // wifi
     if (web_queue == NULL)
     {
         ESP_LOGE(TAG, "Failed to create web request queue");
     }
     else
     {
-        web_ui_start(web_queue);
+        web_ui_start(web_queue, &app_status, app_status_mutex);
     }
 
     if (ir_storage_load_required_commands(ir_commands,
@@ -243,15 +278,14 @@ void app_main(void)
     {
         app_state = APP_IDLE;
         ESP_LOGI(TAG, "Loaded commands from NVS. State -> APP_IDLE");
-        mark_activity();
     }
     else
     {
         app_state = APP_LEARNING;
         ESP_LOGI(TAG, "No saved commands. State -> APP_LEARNING");
-        mark_activity();
     }
-
+    mark_activity();
+    update_app_status();
     while (1)
     {
         switch (app_state)
@@ -272,6 +306,7 @@ void app_main(void)
             if (learning_index >= learning_order_len)
             {
                 app_state = APP_IDLE;
+                update_app_status();
                 break;
             }
 
@@ -321,6 +356,7 @@ void app_main(void)
                     app_state = APP_IDLE;
                     rmt_armed = false;
                     mark_activity();
+                    update_app_status();
                     ESP_LOGI(TAG, "All commands captured!");
                 }
                 else
@@ -351,10 +387,12 @@ void app_main(void)
                 case WEB_REQ_RUN_SCENE:
                     selected_scene = web_req.scene;
                     app_state = APP_RUNNING_SEQUENCE;
+                    update_app_status();
                     break;
 
                 case WEB_REQ_POWER_TOGGLE:
                     app_state = APP_TURN_POWER_ON;
+                    update_app_status();
                     break;
 
                 default:
@@ -376,6 +414,7 @@ void app_main(void)
             {
                 ESP_LOGI(TAG, "Idle timeout -> APP_SLEEP_PREPARE");
                 app_state = APP_SLEEP_PREPARE;
+                update_app_status();
                 break;
             }
 
@@ -384,11 +423,13 @@ void app_main(void)
                 int ldr_avg_value = adc_read_avg(adc_read_raw());
 
                 room_dark = room_is_dark(ldr_avg_value);
+                update_app_status();
                 // ESP_LOGI("ADC LDR", "avg=%d dark=%d lamp assumed on =%d", ldr_avg_value, room_dark, lamp_assumed_on);
                 if (room_dark && !lamp_assumed_on)
                 {
                     mark_activity();
                     app_state = APP_TURN_POWER_ON;
+                    update_app_status();
                     break;
                 }
                 last_ldr_check_us = now_us; // check behaviour later
@@ -407,11 +448,13 @@ void app_main(void)
                     {
                         selected_scene = (selected_scene + 1) % SCENE_COUNT;
                         mark_activity();
+                        update_app_status();
                     }
                     else
                     {
                         selected_scene = (selected_scene + SCENE_COUNT - 1) % SCENE_COUNT;
                         mark_activity();
+                        update_app_status();
                     }
 
                     ESP_LOGI(TAG, "Selected scene: %s", scenes[selected_scene].name);
@@ -446,6 +489,7 @@ void app_main(void)
                             {
                                 mark_activity();
                                 app_state = APP_RUNNING_SEQUENCE;
+                                update_app_status();
                                 break;
                             }
                         }
@@ -471,6 +515,7 @@ void app_main(void)
                 ESP_LOGI(TAG, "No saved commands. APP_LEARNING");
                 mark_activity();
                 app_state = APP_LEARNING;
+                update_app_status();
                 xQueueReset(ir_queue);
             }
 
@@ -498,6 +543,7 @@ void app_main(void)
 
                     has_active_scene = false;
                     app_state = APP_IDLE;
+                    update_app_status();
                     break;
                 }
                 ESP_LOGI(TAG, "Exiting scene: %s", scenes[active_scene].name);
@@ -527,6 +573,7 @@ void app_main(void)
             has_active_scene = true;
             lamp_assumed_on = true;
             app_state = APP_IDLE;
+            update_app_status();
             break;
         }
         case APP_TURN_POWER_ON:
@@ -545,12 +592,14 @@ void app_main(void)
             mark_activity();
             lamp_assumed_on = true;
             app_state = APP_IDLE;
+            update_app_status();
             break;
         }
         case APP_SLEEP_PREPARE:
         {
             ESP_LOGI(TAG, "Preparing to enter sleep");
             app_state = APP_SLEEP;
+            update_app_status();
             break;
         }
         case APP_SLEEP:
@@ -561,11 +610,13 @@ void app_main(void)
             ssd1306_clear(oled_dev_handle);
             mark_activity();
             app_state = APP_IDLE;
+            update_app_status();
             break;
         }
         default:
         {
             app_state = APP_IDLE;
+            update_app_status();
             break;
         }
         }

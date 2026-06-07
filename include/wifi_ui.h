@@ -2,14 +2,12 @@
 #define WIFI_UI_H
 
 #include "app_sequences.h"
+#include "app_status.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
 
-#define ESP_WIFI_SSID "IR_Lamp_Controller"
-#define ESP_WIFI_PASS "12345678"
-#define ESP_WIFI_CHANNEL 1  
-#define MAX_STA_CONN 2
 
 #if CONFIG_ESP_GTK_REKEYING_ENABLE
 #define GTK_REKEY_INTERVAL CONFIG_ESP_GTK_REKEY_INTERVAL
@@ -32,6 +30,6 @@ typedef struct
 } web_request_t;
 
 
-void web_ui_start(QueueHandle_t queue);
+void web_ui_start(QueueHandle_t queue, app_status_t *status, SemaphoreHandle_t app_status_mutex);
 
 #endif // WIFI_UI_H

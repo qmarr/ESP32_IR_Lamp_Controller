@@ -9,28 +9,17 @@
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
+
+#define ESP_WIFI_SSID "IR_Lamp_Controller"
+#define ESP_WIFI_PASS "12345678"
+
+#define ESP_WIFI_CHANNEL 1
+#define MAX_STA_CONN 2
+
 static const char *TAG = "wifi softAP";
 static QueueHandle_t web_request_queue = NULL;
-static const char root_html[] =
-    "<!DOCTYPE html>"
-    "<html>"
-    "<head>"
-    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-    "<title>IR Lamp Controller</title>"
-    "</head>"
-    "<body>"
-    "<h1>IR Lamp Controller</h1>"
-
-    "<p>Scenes:</p>"
-    "<a href='/scene/favourite'><button>Favourite</button></a><br><br>"
-    "<a href='/scene/ocean'><button>Ocean</button></a><br><br>"
-    "<a href='/scene/tension'><button>Tension</button></a><br><br>"
-    "<a href='/scene/movie'><button>Movie</button></a><br><br>"
-    "<p>Control:</p>"
-    "<a href='/power'><button>Power</button></a>"
-
-    "</body>"
-    "</html>";
+static SemaphoreHandle_t status_mutex = NULL;
+static app_status_t *shared_status = NULL;
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -102,11 +91,64 @@ static void wifi_init_softap(void)
              ESP_WIFI_SSID, ESP_WIFI_PASS, ESP_WIFI_CHANNEL);
 }
 
+static const char *safe_scene_name(scene_id_t scene)
+{
+    if (scene >= 0 && scene < SCENE_COUNT)
+    {
+        return scenes[scene].name;
+    }
+
+    return "Unknown";
+}
+
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
 
+    app_status_t local_status = {
+        .app_state = APP_IDLE,
+        .selected_scene = SCENE_MOVIE,
+        .active_scene = SCENE_MOVIE,
+        .has_active_scene = false,
+        .lamp_assumed_on = false,
+        .room_dark = false,
+    };
+
+    if (status_mutex && shared_status &&
+        xSemaphoreTake(status_mutex, pdMS_TO_TICKS(20)) == pdTRUE)
+    {
+        local_status = *shared_status;
+        xSemaphoreGive(status_mutex);
+    }
+
+    char html[2048];
+    const char *selected_name = safe_scene_name(local_status.selected_scene);
+    const char *active_name = local_status.has_active_scene
+                                  ? safe_scene_name(local_status.active_scene)
+                                  : "None";
+
+    snprintf(html, sizeof(html),
+             "<!DOCTYPE html>"
+             "<html><body>"
+             "<h1>IR Lamp Controller</h1>"
+             "<p>Selected: %s</p>"
+             "<p>Active: %s</p>"
+             "<p>Lamp: %s</p>"
+             "<p>Room: %s</p>"
+             "<a href='/scene/favourite'><button>Favourite</button></a><br><br>"
+             "<a href='/scene/ocean'><button>Ocean</button></a><br><br>"
+             "<a href='/scene/tension'><button>Tension</button></a><br><br>"
+             "<a href='/scene/movie'><button>Movie</button></a><br><br>"
+             "<p>Control:</p>"
+             "<a href='/power'><button>Power</button></a>"
+
+             "</body></html>",
+             selected_name,
+             active_name,
+             local_status.lamp_assumed_on ? "ON" : "OFF",
+             local_status.room_dark ? "Dark" : "Light");
+
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, root_html, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
 
     return ESP_OK;
 }
@@ -272,10 +314,23 @@ static httpd_handle_t start_webserver(void)
     return server;
 }
 
-void web_ui_start(QueueHandle_t queue)
+static bool web_ui_started = false;
+static httpd_handle_t web_server = NULL;
+
+void web_ui_start(QueueHandle_t queue, app_status_t *status, SemaphoreHandle_t app_status_mutex)
 {
+    if (web_ui_started)
+    {
+        ESP_LOGW(TAG, "Web UI already started, skipping init");
+        return;
+    }
+
+    web_ui_started = true;
+
     web_request_queue = queue;
+    shared_status = status;
+    status_mutex = app_status_mutex;
 
     wifi_init_softap();
-    start_webserver();
+    web_server = start_webserver();
 }
