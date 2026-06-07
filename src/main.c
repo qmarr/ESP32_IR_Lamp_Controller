@@ -15,6 +15,7 @@
 #include "ldr_sensor.h"
 #include "sleep.h"
 #include "display.h"
+#include "wifi_ui.h"
 
 #define TAG "IR_SNIFFER"
 
@@ -29,7 +30,7 @@
 #define RMT_RESOLUTION_HZ 1000000         // 1us per tick
 #define LDR_CHECK_US 500000               // 500ms
 #define ENCODER_ROTATE_COOLDOWN_US 500000 // 500ms
-#define SLEEP_TIMEOUT_US 40000000         // 40 seconds
+#define SLEEP_TIMEOUT_US 60000000         // 60 seconds
 #define DISPLAY_UPDATE_US 500000
 
 #define MEM_BLOCK_SYMBOLS 64
@@ -64,6 +65,10 @@ rmt_receive_config_t receive_config = {
 
 i2c_master_bus_handle_t bus_handle;
 i2c_master_dev_handle_t oled_dev_handle;
+
+static ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
+static int command_lengths[CMD_COUNT] = {0};
+static rmt_symbol_word_t tx_symbols[IR_LENGTH];
 
 int64_t last_activity_us = 0;
 
@@ -177,17 +182,15 @@ void app_main(void)
     i2c_init();
     ssd1306_init(oled_dev_handle);
     ssd1306_clear(oled_dev_handle);
+    ESP_LOGI(TAG, "Main stack high watermark: %u",
+             uxTaskGetStackHighWaterMark(NULL));
     mark_activity();
 
     // variables
-    ir_symbol_t ir_commands[CMD_COUNT][IR_LENGTH];
-    int command_lengths[CMD_COUNT] = {0};
-    rmt_symbol_word_t tx_symbols[IR_LENGTH];
     int learning_index = 0;
     bool rmt_armed = false;
 
-
-    //display
+    // display
     static int64_t last_display_update_us = 0;
     static int last_displayed_learning_index = -1;
 
@@ -217,7 +220,18 @@ void app_main(void)
     // states
     app_state_t app_state = APP_LEARNING;
 
+    // WIFI
+    static bool web_ui_enabled = true;
+    // QueueHandle_t web_request_queue = NULL;
+    // web_request_queue = xQueueCreate(5, sizeof(web_request_t));
+
     ESP_ERROR_CHECK(ir_storage_init());
+    ESP_LOGI(TAG, "Main stack high watermark: %u",
+             uxTaskGetStackHighWaterMark(NULL));
+    // wifi
+    web_ui_start();
+    ESP_LOGI(TAG, "Main stack high watermark: %u",
+             uxTaskGetStackHighWaterMark(NULL));
 
     if (ir_storage_load_required_commands(ir_commands,
                                           command_lengths,
@@ -329,7 +343,8 @@ void app_main(void)
                 last_display_update_us = now_us;
             }
 
-            if (now_us - last_activity_us > SLEEP_TIMEOUT_US)
+            if (!web_ui_enabled &&
+                now_us - last_activity_us > SLEEP_TIMEOUT_US)
             {
                 ESP_LOGI(TAG, "Idle timeout -> APP_SLEEP_PREPARE");
                 app_state = APP_SLEEP_PREPARE;
