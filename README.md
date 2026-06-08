@@ -18,6 +18,8 @@ The project is built with ESP-IDF and focuses on embedded firmware architecture,
 * Light sleep mode after inactivity
 * Long press reset learned commands and enters learning mode
 * FSM-based application structure
+* OLED status display
+* Experimental Web UI over ESP32 SoftAP
 
 ## Workflow
 On first startup, the controller checks whether the required IR commands are already stored in NVS.
@@ -48,8 +50,36 @@ stateDiagram-v2
     APP_SLEEP --> APP_IDLE: wake by encoder button
 ```
 
-## Schematic
-[schematic placeholder]()
+## Module overview
+
+| Module | Responsibility |
+|---|---|
+| `main.c` | Main FSM, application flow, encoder handling, LDR decisions, Web UI request processing |
+| `app_sequences.c/.h` | Scene definitions, learning order, command names |
+| `ir_commands.c/.h` | IR command recording, TX symbol building, command sending, sequence sending |
+| `ir_storage.c/.h` | Saving and loading learned IR commands using NVS |
+| `ldr_sensor.c/.h` | ADC reading, averaging, dark/light detection |
+| `display.c/.h` | SSD1306 OLED display driver and UI screens |
+| `sleep.c/.h` | Light sleep entry and wakeup handling |
+| `wifi_ui.c/.h` | ESP32 SoftAP, HTTP server, Web UI buttons, Web request queue |
+| `app_status.h` | Shared application status structure for Web UI status reporting |
+| `enums.h` | Shared enums for IR commands and application states |
+
+## Hardware Pinout
+
+| Component | Signal | ESP32-S3 GPIO | Notes |
+|---|---|---:|---|
+| TSOP34836 | OUT | GPIO X | RMT RX |
+| IR LED driver | Base | GPIO X | RMT TX through base resistor |
+| Rotary encoder | SW | GPIO X | Pull-up input |
+| Rotary encoder | CLK | GPIO X | Pull-up input |
+| Rotary encoder | DT | GPIO X | Pull-up input |
+| LDR voltage divider | ADC node | GPIO X | ADC input |
+| SSD1306 OLED | SDA | GPIO X | I2C SDA |
+| SSD1306 OLED | SCL | GPIO X | I2C SCL |
+
+## Wiring / Prototype Schematic
+![Wiring schematic](docs/wiring_schematic.png)
 
 ## Video
 [video placeholder]() 
@@ -66,15 +96,16 @@ stateDiagram-v2
 5. Press the encoder button to run the selected scene.
 6. Long press the encoder button to clear saved commands and restart learning mode.
 
-## Known issues
-* The controller does not receive feedback from the lamp, so the lamp state is internally assumed. If original controller is used, controller won't know either.
-* Lamp modes behave as toggles.
-* IR signal depends on LED position and distance.
-* Current wakeup is handled only by encoder button, so ldr won't turn on lamp yet.  
+## Known Limitations
+
+- The controller does not receive feedback from the lamp, so the lamp state is internally assumed.
+- If the original remote is used directly, the controller may lose synchronization with the real lamp state.
+- Some lamp modes behave as toggles, so scene exit sequences are required to avoid overlapping effects.
+- IR reliability depends on LED position, distance, angle, and receiver sensitivity.
+- When Web UI is active, light sleep is disabled to keep the SoftAP available.
+- LDR-based automatic power-on does not run while the controller is in light sleep.
 
 ## Future Improvements
-* OLED display for selected scene and system state
-* Web interface for scene control
 * Better IR signal strength using an optimized LED driver
 * Saving the last active scene in NVS
 * Sleep improvements 
