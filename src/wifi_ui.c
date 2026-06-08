@@ -120,7 +120,7 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         xSemaphoreGive(status_mutex);
     }
 
-    char html[2048];
+    char html[4096];
     const char *selected_name = safe_scene_name(local_status.selected_scene);
     const char *active_name = local_status.has_active_scene
                                   ? safe_scene_name(local_status.active_scene)
@@ -128,20 +128,124 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 
     snprintf(html, sizeof(html),
              "<!DOCTYPE html>"
-             "<html><body>"
-             "<h1>IR Lamp Controller</h1>"
-             "<p>Selected: %s</p>"
-             "<p>Active: %s</p>"
-             "<p>Lamp: %s</p>"
-             "<p>Room: %s</p>"
-             "<a href='/scene/favourite'><button>Favourite</button></a><br><br>"
-             "<a href='/scene/ocean'><button>Ocean</button></a><br><br>"
-             "<a href='/scene/tension'><button>Tension</button></a><br><br>"
-             "<a href='/scene/movie'><button>Movie</button></a><br><br>"
-             "<p>Control:</p>"
-             "<a href='/power'><button>Power</button></a>"
+             "<html>"
+             "<head>"
+             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+             "<title>IR Lamp Controller</title>"
+             "<style>"
+             "body {"
+             "margin: 0;"
+             "font-family: Arial, sans-serif;"
+             "background: #111827;"
+             "color: #f9fafb;"
+             "display: flex;"
+             "justify-content: center;"
+             "align-items: center;"
+             "min-height: 100vh;"
+             "}"
+             ".card {"
+             "width: 90%%;"
+             "max-width: 420px;"
+             "background: #1f2937;"
+             "border-radius: 18px;"
+             "padding: 24px;"
+             "box-shadow: 0 10px 30px rgba(0,0,0,0.35);"
+             "}"
+             "h1 {"
+             "font-size: 26px;"
+             "margin: 0 0 8px 0;"
+             "text-align: center;"
+             "}"
+             ".subtitle {"
+             "text-align: center;"
+             "color: #9ca3af;"
+             "margin-bottom: 24px;"
+             "font-size: 14px;"
+             "}"
+             ".status {"
+             "background: #111827;"
+             "border-radius: 12px;"
+             "padding: 12px;"
+             "margin-bottom: 18px;"
+             "font-size: 14px;"
+             "}"
+             ".status p {"
+             "margin: 6px 0;"
+             "color: #d1d5db;"
+             "}"
+             ".section-title {"
+             "font-size: 14px;"
+             "color: #d1d5db;"
+             "margin: 18px 0 10px;"
+             "text-transform: uppercase;"
+             "letter-spacing: 1px;"
+             "}"
+             ".button-grid {"
+             "display: grid;"
+             "grid-template-columns: 1fr 1fr;"
+             "gap: 12px;"
+             "}"
+             "a {"
+             "text-decoration: none;"
+             "}"
+             "button {"
+             "width: 100%%;"
+             "padding: 14px;"
+             "border: none;"
+             "border-radius: 12px;"
+             "background: #2563eb;"
+             "color: white;"
+             "font-size: 16px;"
+             "font-weight: bold;"
+             "cursor: pointer;"
+             "}"
+             "button:active {"
+             "transform: scale(0.97);"
+             "background: #1d4ed8;"
+             "}"
+             ".power {"
+             "background: #dc2626;"
+             "margin-top: 12px;"
+             "}"
+             ".power:active {"
+             "background: #b91c1c;"
+             "}"
+             ".footer {"
+             "margin-top: 22px;"
+             "text-align: center;"
+             "font-size: 12px;"
+             "color: #6b7280;"
+             "}"
+             "</style>"
+             "</head>"
 
-             "</body></html>",
+             "<body>"
+             "<div class='card'>"
+             "<h1>IR Lamp Controller</h1>"
+             "<div class='subtitle'>ESP32-S3 Ambient Lamp Control</div>"
+
+             "<div class='status'>"
+             "<p><b>Selected:</b> %s</p>"
+             "<p><b>Active:</b> %s</p>"
+             "<p><b>Lamp:</b> %s</p>"
+             "<p><b>Room:</b> %s</p>"
+             "</div>"
+
+             "<div class='section-title'>Scenes</div>"
+             "<div class='button-grid'>"
+             "<a href='/scene/movie'><button>Movie</button></a>"
+             "<a href='/scene/favourite'><button>Favourite</button></a>"
+             "<a href='/scene/ocean'><button>Ocean</button></a>"
+             "<a href='/scene/tension'><button>Tension</button></a>"
+             "</div>"
+
+             "<div class='section-title'>Control</div>"
+             "<a href='/power'><button class='power'>Power</button></a>"
+
+             "<div class='footer'>Connected to ESP32 SoftAP</div>"
+             "</div>"
+             "</body>"
+             "</html>",
              selected_name,
              active_name,
              local_status.lamp_assumed_on ? "ON" : "OFF",
@@ -292,7 +396,7 @@ static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
+    config.stack_size = 12288;
     ESP_LOGI(TAG, "Starting HTTP server on port %d", config.server_port);
 
     esp_err_t err = httpd_start(&server, &config);

@@ -69,14 +69,14 @@ stateDiagram-v2
 
 | Component | Signal | ESP32-S3 GPIO | Notes |
 |---|---|---:|---|
-| TSOP34836 | OUT | GPIO X | RMT RX |
-| IR LED driver | Base | GPIO X | RMT TX through base resistor |
-| Rotary encoder | SW | GPIO X | Pull-up input |
-| Rotary encoder | CLK | GPIO X | Pull-up input |
-| Rotary encoder | DT | GPIO X | Pull-up input |
-| LDR voltage divider | ADC node | GPIO X | ADC input |
-| SSD1306 OLED | SDA | GPIO X | I2C SDA |
-| SSD1306 OLED | SCL | GPIO X | I2C SCL |
+| TSOP34836 | OUT | GPIO 15 | RMT RX |
+| IR LED driver | Base | GPIO 16 | RMT TX through base resistor |
+| Rotary encoder | SW | GPIO 4 | Pull-up input |
+| Rotary encoder | CLK | GPIO 39 | Pull-up input |
+| Rotary encoder | DT | GPIO 38 | Pull-up input |
+| LDR voltage divider | ADC node | GPIO 1 | ADC input |
+| SSD1306 OLED | SDA | GPIO 8 | I2C SDA |
+| SSD1306 OLED | SCL | GPIO 9 | I2C SCL |
 
 ## Wiring / Prototype Schematic
 ![Wiring schematic](docs/wiring_schematic.png)
