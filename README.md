@@ -82,10 +82,9 @@ stateDiagram-v2
 ![Wiring schematic](docs/wiring_schematic.png)
 
 ## Video
-[video placeholder]() 
-
-## PCB Layout
-[PCB layout placeholder]()
+![Turn on demo](docs/video/turn_on_demo.mp4) 
+![Change scene demo](docs/video/change_scene_demo.mp4) 
+![Learning demo](docs/video/OLED.gif)
 
 
 ## Usage
