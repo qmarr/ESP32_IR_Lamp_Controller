@@ -82,9 +82,9 @@ stateDiagram-v2
 ![Wiring schematic](docs/wiring_schematic.png)
 
 ## Video
-![Turn on demo](docs/video/turn_on_demo.mp4) 
+![Turn on demo](docs/video/turn_on_demo.gif) 
 
-![Change scene demo](docs/video/change_scene_demo.mp4) 
+![Change scene demo](docs/video/change_scene_demo.gif) 
 
 ![Learning demo](docs/video/OLED.gif)
 
